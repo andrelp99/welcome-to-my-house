@@ -1,0 +1,74 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Welcome to My House — token (terne RGB). Palette giallo + rosso ── */
+:root {
+  --brand-primary: 214 150 0;        /* #D69600 giallo scuro, leggibile su chiaro */
+  --brand-primary-light: 245 184 0;  /* #F5B800 */
+  --brand-primary-dim: 253 240 200;  /* #FDF0C8 sfondo selezionato */
+  --brand-accent: 200 40 52;         /* #C82834 rosso pomodoro */
+  --text-on-brand: 28 20 8;          /* testo scuro su giallo */
+
+  --bg-base: 251 247 238;            /* #FBF7EE crema */
+  --bg-surface: 255 255 255;
+  --bg-elevated: 246 239 224;
+  --bg-hover: 240 231 210;
+  --bg-border: 229 217 192;
+
+  --text-primary: 33 26 18;
+  --text-secondary: 108 94 76;
+  --text-muted: 150 136 116;
+
+  --color-positive: 34 150 84;
+  --color-negative: 200 40 52;
+  --color-warning: 214 120 0;
+
+  --chart-1: 214 150 0;
+  --chart-2: 200 40 52;
+  --chart-3: 34 150 84;
+  --chart-4: 214 100 20;
+  --chart-5: 20 140 150;
+  --chart-6: 120 70 160;
+
+  --shadow-card: 0 1px 2px rgba(33, 26, 18, 0.06), 0 4px 12px rgba(33, 26, 18, 0.05);
+  --shadow-elevated: 0 8px 28px rgba(33, 26, 18, 0.14);
+}
+
+.dark {
+  --brand-primary: 245 184 0;        /* #F5B800 giallo */
+  --brand-primary-light: 255 208 70; /* #FFD046 */
+  --brand-primary-dim: 64 50 12;     /* #40320C */
+  --brand-accent: 239 71 80;         /* #EF4750 rosso */
+  --text-on-brand: 28 20 8;
+
+  --bg-base: 20 17 15;               /* #14110F nero caldo */
+  --bg-surface: 30 26 23;
+  --bg-elevated: 40 35 31;
+  --bg-hover: 50 44 39;
+  --bg-border: 62 55 48;
+
+  --text-primary: 246 240 230;
+  --text-secondary: 180 168 152;
+  --text-muted: 120 110 98;
+
+  --color-positive: 80 200 120;
+  --color-negative: 239 71 80;
+  --color-warning: 255 150 50;
+
+  --chart-1: 245 184 0;
+  --chart-2: 239 71 80;
+  --chart-3: 80 200 120;
+  --chart-4: 255 150 50;
+  --chart-5: 60 190 200;
+  --chart-6: 170 120 220;
+
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.45), 0 4px 16px rgba(0, 0, 0, 0.25);
+  --shadow-elevated: 0 4px 24px rgba(0, 0, 0, 0.55);
+}
+
+html, body, #root { height: 100%; }
+body {
+  @apply bg-bg-base text-text-primary antialiased;
+  -webkit-tap-highlight-color: transparent;
+}

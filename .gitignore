@@ -1,0 +1,10 @@
+node_modules/
+dist/
+dev-dist/
+.wrangler/
+.dev.vars
+*.log
+.DS_Store
+Thumbs.db
+# dati personali e ricette esportate: mai nel repo pubblico
+data/
