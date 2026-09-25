@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { push, pull, type Change } from './sync';
 
 export type Env = {
   DB: D1Database;
@@ -27,6 +28,28 @@ app.get('/ping', async (c) => {
     'SELECT (SELECT COUNT(*) FROM locations) AS locations, (SELECT COUNT(*) FROM categories) AS categories'
   ).first<{ locations: number; categories: number }>();
   return c.json({ ok: true, db: row });
+});
+
+// Sync: invia modifiche locali e ricevi quelle nuove (rev > since).
+app.post('/sync', async (c) => {
+  const body = await c.req.json<{ since?: number; changes?: Change[]; device?: string }>().catch(() => null);
+  if (!body) return c.json({ error: 'JSON non valido' }, 400);
+  const device = String(body.device ?? 'sconosciuto').slice(0, 60);
+  const pushed = await push(c.env.DB, body.changes ?? [], device);
+  const since = Number.isFinite(Number(body.since)) ? Number(body.since) : -1;
+  const pulled = await pull(c.env.DB, since);
+  return c.json({ pushed, ...pulled });
+});
+
+// Cronologia modifiche (tutti i dispositivi).
+app.get('/history', async (c) => {
+  const limit = Math.min(Number(c.req.query('limit')) || 50, 200);
+  const { results } = await c.env.DB.prepare(
+    'SELECT id, table_name, row_id, before_json, after_json, device, at FROM change_log ORDER BY at DESC LIMIT ?'
+  )
+    .bind(limit)
+    .all();
+  return c.json({ items: results });
 });
 
 app.notFound((c) => c.json({ error: 'Endpoint non trovato' }, 404));

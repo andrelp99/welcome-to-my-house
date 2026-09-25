@@ -1,0 +1,39 @@
+import Dexie from 'dexie';
+
+// Copia locale completa dei dati: l'app legge/scrive sempre qui, il sync allinea col server.
+export const db = new Dexie('welcome-house');
+
+db.version(1).stores({
+  locations: 'id',
+  categories: 'id',
+  stores: 'id',
+  products: 'id, name, area, category_id',
+  receipts: 'id, date, store_id',
+  purchase_lines: 'id, product_id, receipt_id',
+  stock_lots: 'id, product_id, location_id',
+  shopping_items: 'id, product_id',
+  extra_expenses: 'id',
+  budgets: 'id',
+  outbox: '++seq, [table+id]', // modifiche da inviare
+  history: '++hid, at', // cronologia locale per "annulla"
+  meta: 'key',
+});
+
+export const SYNC_TABLES = [
+  'locations', 'categories', 'stores', 'products', 'receipts',
+  'purchase_lines', 'stock_lots', 'shopping_items', 'extra_expenses', 'budgets',
+];
+
+export const alive = (r) => r && !r.deleted;
+
+export async function getMeta(key, fallback = null) {
+  const r = await db.meta.get(key);
+  return r ? r.value : fallback;
+}
+export function setMeta(key, value) {
+  return db.meta.put({ key, value });
+}
+
+export function uuid() {
+  return crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}

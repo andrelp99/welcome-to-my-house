@@ -74,3 +74,11 @@ data/                  file locali NON versionati (es. export ricette GZ)
 
 In F0 le API sono in sola lettura (`/api/ping`). R2 (foto) e Workers AI verranno aggiunti nelle fasi F2–F3 e
 documentati qui.
+
+## Sync offline-first (F1)
+
+- L'app legge/scrive sempre su IndexedDB (Dexie, `src/db/`). Ogni modifica va in `outbox` e parte verso `POST /api/sync`.
+- Il server assegna a ogni riga una `rev` crescente; i dispositivi scaricano tutto con `rev > cursore`.
+- Conflitti: vince l'`updated_at` più recente (per riga). Il server registra tutto in `change_log` (`GET /api/history`).
+- Annulla: cronologia locale per dispositivo (Impostazioni → Cronologia).
+- Backup: Impostazioni → Esporta JSON / Ripristina.

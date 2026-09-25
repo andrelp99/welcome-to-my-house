@@ -3,6 +3,9 @@ import { Layout } from './components/ui/Layout.jsx';
 import Home from './pages/Home.jsx';
 import Attiva from './pages/Attiva.jsx';
 import Impostazioni from './pages/Impostazioni.jsx';
+import Inventario from './pages/Inventario.jsx';
+import Catalogo from './pages/Catalogo.jsx';
+import Spesa from './pages/Spesa.jsx';
 import { Placeholder } from './pages/Placeholder.jsx';
 
 export default function App() {
@@ -11,9 +14,10 @@ export default function App() {
       <Route path="/attiva" element={<Attiva />} />
       <Route element={<Layout />}>
         <Route index element={<Home />} />
-        <Route path="casa" element={<Placeholder title="Casa" fase="F1" testo="Pulizia, bagno, lavanderia, farmacia e tutto il non-cibo." />} />
-        <Route path="dispensa" element={<Placeholder title="Dispensa" fase="F1" testo="Frigo, freezer e dispensa cibo con lotti e scadenze." />} />
-        <Route path="spesa" element={<Placeholder title="Lista spesa" fase="F1" testo="Lista unica, preferiti, essenziali e check-in della spesa." />} />
+        <Route path="casa" element={<Inventario key="casa" area="casa" title="Casa" subtitle="Pulizia, bagno, lavanderia, farmacia e tutto il non-cibo." />} />
+        <Route path="dispensa" element={<Inventario key="cibo" area="cibo" title="Dispensa" subtitle="Frigo, freezer e dispensa: lotti e scadenze." />} />
+        <Route path="spesa" element={<Spesa />} />
+        <Route path="catalogo" element={<Catalogo />} />
         <Route path="ricette" element={<Placeholder title="Ricettario" fase="F2" testo="Le tue ricette, con ingredienti confrontati con la dispensa." />} />
         <Route path="finanze" element={<Placeholder title="Prospetto finanziario" fase="F5" testo="Storico prezzi, budget, proiezioni, sconti e analisi." />} />
         <Route path="impostazioni" element={<Impostazioni />} />

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams, Link } from 'react-router';
 import { CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 import { apiFetch, setHouseKey } from '../api/client.js';
+import { syncNow } from '../db/sync.js';
 
 // Link di attivazione: https://<app>/attiva?k=<CHIAVE> — si apre una volta per dispositivo.
 export default function Attiva() {
@@ -17,7 +18,10 @@ export default function Attiva() {
     setHouseKey(k);
     window.history.replaceState(null, '', '/attiva');
     apiFetch('/api/ping')
-      .then(() => setState('ok'))
+      .then(() => {
+        setState('ok');
+        syncNow();
+      })
       .catch(() => setState('error'));
   }, [params]);
 

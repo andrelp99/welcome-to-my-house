@@ -1,6 +1,29 @@
 import { NavLink, Outlet, Link } from 'react-router';
 import { Home, SprayCan, Refrigerator, ShoppingCart, BookOpen, PiggyBank, Settings } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle.jsx';
+import { useSyncState, useToast } from '../../hooks/useData.js';
+
+function SyncDot() {
+  const s = useSyncState();
+  const cls = { ok: 'bg-positive', syncing: 'bg-brand animate-pulse', offline: 'bg-warning', error: 'bg-negative', 'no-key': 'bg-negative', 'bad-key': 'bg-negative' }[s.status] || 'bg-bg-border';
+  const title = s.pending ? `${s.status} · ${s.pending} in coda` : s.status;
+  return <span title={`Sync: ${title}`} className={`inline-block w-2.5 h-2.5 rounded-full ${cls}`} />;
+}
+
+function Toast() {
+  const [t, close] = useToast();
+  if (!t) return null;
+  return (
+    <div className="fixed z-50 left-1/2 -translate-x-1/2 bottom-24 md:bottom-6 flex items-center gap-4 rounded-md bg-text-primary text-bg-base px-4 py-3 text-sm shadow-elevated max-w-[92vw]">
+      <span>{t.msg}</span>
+      {t.action && (
+        <button type="button" className="font-bold text-brand-light uppercase text-xs" onClick={() => { t.action.run(); close(); }}>
+          {t.action.label}
+        </button>
+      )}
+    </div>
+  );
+}
 
 export const NAV = [
   { to: '/', label: 'Home', icon: Home, end: true },
@@ -20,6 +43,7 @@ function Logo() {
         <br />
         <span className="text-brand">My House</span>
       </span>
+      <SyncDot />
     </Link>
   );
 }
@@ -104,6 +128,7 @@ export function Layout() {
           ))}
         </nav>
       </div>
+      <Toast />
     </div>
   );
 }
