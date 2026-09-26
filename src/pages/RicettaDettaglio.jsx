@@ -1,0 +1,224 @@
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
+import { ArrowLeft, Pencil, Star, Clock, Flame, Hourglass, Gauge, ChefHat, UtensilsCrossed, ShoppingCart, Share2, FileDown, Trash2, Timer, ExternalLink, Plus } from 'lucide-react';
+import { useData, useRecipes, showToast } from '../hooks/useData.js';
+import { Button, IconButton, Stepper, Empty } from '../components/ui/kit.jsx';
+import { Photo, IngredientList, CookedModal, LinkModal } from '../components/recipes.jsx';
+import { ProductForm } from '../components/forms.jsx';
+import { recipeStatus, addMissingToList, recipeToText, parseList, joinList, suggestDiet } from '../db/recipes.js';
+import { fmtQty } from '../db/logic.js';
+import { put, save, undo } from '../db/repo.js';
+import { StatusChip } from './Ricette.jsx';
+
+export default function RicettaDettaglio() {
+  const { id } = useParams();
+  const nav = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const data = useData();
+  const rec = useRecipes();
+  const recipe = rec?.byId[id];
+  const [servings, setServings] = useState(null);
+  const [cooked, setCooked] = useState(false);
+  const [linking, setLinking] = useState(null);
+  const [creating, setCreating] = useState(null);
+
+  useEffect(() => {
+    if (recipe && servings == null) setServings(Number(params.get('porzioni')) || recipe.servings || 1);
+  }, [recipe, servings, params]);
+  useEffect(() => {
+    if (params.get('cucinato') && recipe) {
+      setCooked(true);
+      params.delete('cucinato');
+      setParams(params, { replace: true });
+    }
+  }, [params, recipe, setParams]);
+
+  const ings = rec?.ings[id] || [];
+  const steps = rec?.steps[id] || [];
+  const scale = recipe ? (servings || recipe.servings) / (recipe.servings || 1) : 1;
+  const status = useMemo(() => (data && rec ? recipeStatus(ings, scale, data, rec.subs) : null), [data, rec, ings, scale]);
+
+  if (!data || !rec) return null;
+  if (!recipe) return <Empty icon={ChefHat}>Ricetta non trovata. <Link to="/ricette" className="text-brand">Torna al ricettario</Link></Empty>;
+
+  const diet = parseList(recipe.diet_tags);
+  const tags = parseList(recipe.tags);
+  const suggested = suggestDiet(recipe, ings, data).filter((t) => !diet.includes(t));
+  const toBuy = status.rows.filter(({ ing, st }) => !ing.optional && !st.sub && (st.level === 'missing' || st.level === 'low')).length;
+
+  async function addMissing() {
+    const n = await addMissingToList(recipe, status, data);
+    showToast(n ? `${n} in lista spesa` : 'Già tutto in lista', n ? { label: 'Annulla', run: () => undo() } : undefined);
+  }
+  async function share() {
+    const text = recipeToText(recipe, ings, steps, scale);
+    try {
+      if (navigator.share) await navigator.share({ title: recipe.title, text });
+      else {
+        await navigator.clipboard.writeText(text);
+        showToast('Ricetta copiata negli appunti');
+      }
+    } catch {
+      /* condivisione annullata */
+    }
+  }
+  function exportPdf() {
+    const old = document.title;
+    document.title = recipe.title;
+    window.print();
+    setTimeout(() => (document.title = old), 500);
+  }
+  async function del() {
+    const ops = [{ table: 'recipes', row: { id, deleted: 1 } }, ...ings.map((i) => ({ table: 'recipe_ingredients', row: { id: i.id, deleted: 1 } })), ...steps.map((s) => ({ table: 'recipe_steps', row: { id: s.id, deleted: 1 } }))];
+    await save(ops, `Eliminata ricetta ${recipe.title}`);
+    showToast(`Eliminata ${recipe.title}`, { label: 'Annulla', run: () => undo() });
+    nav('/ricette');
+  }
+  async function link(ing, p) {
+    await put('recipe_ingredients', { id: ing.id, product_id: p.id }, `${ing.text} → ${p.name}`);
+    setLinking(null);
+  }
+
+  return (
+    <div className="space-y-5 recipe-print">
+      <div className="flex items-center gap-2 print:hidden">
+        <IconButton label="Indietro" onClick={() => nav('/ricette')}>
+          <ArrowLeft size={18} />
+        </IconButton>
+        <div className="flex-1" />
+        <IconButton label={recipe.favorite ? 'Togli dalle preferite' : 'Preferita'} onClick={() => put('recipes', { id, favorite: recipe.favorite ? 0 : 1 })}>
+          <Star size={18} className={recipe.favorite ? 'fill-brand text-brand' : ''} />
+        </IconButton>
+        <IconButton label="Condividi testo" onClick={share}>
+          <Share2 size={18} />
+        </IconButton>
+        <IconButton label="Esporta PDF" onClick={exportPdf}>
+          <FileDown size={18} />
+        </IconButton>
+        <IconButton label="Modifica" onClick={() => nav(`/ricette/${id}/modifica`)}>
+          <Pencil size={18} />
+        </IconButton>
+        <IconButton label="Elimina" onClick={del}>
+          <Trash2 size={18} />
+        </IconButton>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] items-start">
+        {recipe.photo_key ? <Photo id={recipe.photo_key} alt={recipe.title} className="w-full aspect-[4/3] rounded-lg" icon={false} /> : null}
+        <div className={`space-y-3 ${recipe.photo_key ? '' : 'md:col-span-2'}`}>
+          <h1 className="text-2xl md:text-3xl font-bold leading-tight">{recipe.title}</h1>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-text-secondary">
+            {recipe.prep_min ? <Meta icon={Clock}>prep {recipe.prep_min}′</Meta> : null}
+            {recipe.cook_min ? <Meta icon={Flame}>cottura {recipe.cook_min}′</Meta> : null}
+            {recipe.rest_min ? <Meta icon={Hourglass}>riposo {recipe.rest_min}′</Meta> : null}
+            {recipe.difficulty ? <Meta icon={Gauge}>{recipe.difficulty}</Meta> : null}
+            {recipe.cooked_count ? <Meta icon={ChefHat}>cucinata {recipe.cooked_count}× · ultima {new Date(recipe.last_cooked_at).toLocaleDateString('it-IT')}</Meta> : null}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            <span className="print:hidden"><StatusChip st={status} /></span>
+            {diet.map((t) => (
+              <span key={t} className="rounded-full border border-brand/50 text-brand px-2 py-0.5 text-xs">{t}</span>
+            ))}
+            {tags.map((t) => (
+              <span key={t} className="rounded-full border border-bg-border px-2 py-0.5 text-xs text-text-secondary">#{t}</span>
+            ))}
+            {suggested.map((t) => (
+              <button key={t} type="button" onClick={() => put('recipes', { id, diet_tags: joinList([...diet, t]) }, `Tag ${t}`)} className="print:hidden inline-flex items-center gap-0.5 rounded-full border border-dashed border-text-muted px-2 py-0.5 text-xs text-text-muted">
+                <Plus size={12} /> {t}?
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-2 pt-1 print:hidden">
+            <Button onClick={() => nav(`/ricette/${id}/cucina?porzioni=${servings}`)} disabled={!steps.length}>
+              <UtensilsCrossed size={16} /> Cucina
+            </Button>
+            <Button variant="ghost" onClick={() => setCooked(true)}>
+              <ChefHat size={16} /> Ho cucinato
+            </Button>
+            {toBuy > 0 && (
+              <Button variant="ghost" onClick={addMissing}>
+                <ShoppingCart size={16} /> Mancanti in lista ({toBuy})
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] items-start">
+        <section className="rounded-lg border border-bg-border bg-bg-surface p-4 shadow-card">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <h2 className="font-bold">Ingredienti</h2>
+            <div className="print:hidden">
+              <Stepper value={servings || recipe.servings} unit="porz." min={1} onChange={(v) => setServings(Math.max(1, v))} />
+            </div>
+            <span className="hidden print:inline text-sm">{fmtQty(servings || recipe.servings)} porzioni</span>
+          </div>
+          {ings.length ? <IngredientList rows={status.rows} scale={scale} onLink={setLinking} /> : <p className="text-sm text-text-muted">Nessun ingrediente.</p>}
+        </section>
+
+        <section className="rounded-lg border border-bg-border bg-bg-surface p-4 shadow-card">
+          <h2 className="font-bold mb-2">Preparazione</h2>
+          {steps.length ? (
+            <ol className="space-y-4">
+              {steps.map((s, n) => (
+                <li key={s.id} className="flex gap-3">
+                  <span className="shrink-0 w-7 h-7 rounded-full bg-brand text-brand-on font-bold text-sm flex items-center justify-center">{n + 1}</span>
+                  <div className="flex-1 min-w-0 space-y-2">
+                    <p className="whitespace-pre-line leading-relaxed">{s.text}</p>
+                    {s.timer_min ? (
+                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-brand">
+                        <Timer size={14} /> {fmtQty(s.timer_min)} min
+                      </span>
+                    ) : null}
+                    {s.photo_key ? <Photo id={s.photo_key} className="w-full max-w-sm aspect-video rounded-md" icon={false} /> : null}
+                  </div>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="text-sm text-text-muted">Nessun passaggio.</p>
+          )}
+        </section>
+      </div>
+
+      {(recipe.notes || recipe.source_url) && (
+        <section className="rounded-lg border border-bg-border bg-bg-surface p-4 shadow-card space-y-2">
+          {recipe.notes && <p className="whitespace-pre-line text-sm">{recipe.notes}</p>}
+          {recipe.source_url && (
+            <a href={recipe.source_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-brand text-sm break-all">
+              <ExternalLink size={14} /> {recipe.source_url}
+            </a>
+          )}
+        </section>
+      )}
+
+      {cooked && <CookedModal recipe={recipe} status={status} servings={servings || recipe.servings} data={data} onClose={() => setCooked(false)} />}
+      {linking && (
+        <LinkModal
+          ing={linking}
+          data={data}
+          onClose={() => setLinking(null)}
+          onPick={(p) => link(linking, p)}
+          onCreate={(name) => setCreating({ ing: linking, name })}
+        />
+      )}
+      {creating && (
+        <ProductForm
+          data={data}
+          initialName={creating.name}
+          area="cibo"
+          onClose={() => setCreating(null)}
+          onSaved={(p) => link(creating.ing, p)}
+        />
+      )}
+    </div>
+  );
+}
+
+function Meta({ icon: Icon, children }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <Icon size={14} /> {children}
+    </span>
+  );
+}
