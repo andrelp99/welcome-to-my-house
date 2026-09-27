@@ -34,10 +34,16 @@ db.version(3).stores({
   receipt_aliases: 'id, product_id',
 });
 
+// F4: planner
+db.version(4).stores({
+  meal_plan: 'id, date, recipe_id',
+});
+
 export const SYNC_TABLES = [
   'locations', 'categories', 'stores', 'products', 'receipts',
   'purchase_lines', 'stock_lots', 'shopping_items', 'extra_expenses', 'budgets',
   'recipes', 'recipe_ingredients', 'recipe_steps', 'substitutions', 'events', 'receipt_aliases',
+  'meal_plan',
 ];
 
 export const alive = (r) => r && !r.deleted;

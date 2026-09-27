@@ -203,7 +203,7 @@ export default function Cucina() {
           <ChevronLeft size={24} /> Indietro
         </button>
         {last || !steps.length ? (
-          <button type="button" onClick={() => nav(`/ricette/${id}?cucinato=1&porzioni=${servings}`)} className="inline-flex items-center justify-center gap-2 rounded-lg bg-positive text-white py-5 text-lg font-bold">
+          <button type="button" onClick={() => nav(`/ricette/${id}?cucinato=1&porzioni=${servings}${params.get('piano') ? `&piano=${params.get('piano')}` : ''}`)} className="inline-flex items-center justify-center gap-2 rounded-lg bg-positive text-white py-5 text-lg font-bold">
             <ChefHat size={24} /> Fatto!
           </button>
         ) : (

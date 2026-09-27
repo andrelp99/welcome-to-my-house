@@ -69,11 +69,15 @@ data/                  file locali NON versionati (es. export ricette GZ)
 | Workers AI (binding `AI`) | Cloudflare Workers AI | read | Da F3: ricette da testo/foto/pagine senza dati strutturati, lettura scontrini. Modelli in `wrangler.jsonc` → `vars` |
 | Pagine web e immagini ricette (es. `giallozafferano.it`) | HTTP esterno | read | Da F3: import da link (`POST /api/import/url`) e copia foto (`POST /api/files/fetch`) |
 
+| `welcome-house-db.push_subscriptions`, `server_kv` | Cloudflare D1 | read | Da F4: dispositivi iscritti alle notifiche, chiavi VAPID, ultimo invio |
+
 ### Output (scritture)
 
 | Risorsa | Tipo | Direzione | Note |
 |---|---|---|---|
 | `welcome-house-db` (binding `DB`) | Cloudflare D1 | write | Da F1: inserimenti e modifiche di tutti i dati dell'app, con `change_log` |
+| `welcome-house-db.push_subscriptions`, `server_kv` | Cloudflare D1 | write | Da F4: iscrizioni push; chiavi VAPID generate al primo uso |
+| Servizi push dei browser (FCM ecc.) | HTTP esterno | write | Da F4: notifiche cifrate (Web Push, VAPID) dal cron |
 | `welcome-house-db.files` | Cloudflare D1 | write | Da F2: foto compresse (max ~1,9 MB, `PUT /api/files/:id`), immutabili |
 
 Foto in D1 (non R2): nessun bucket da creare, limite free 5 GB ampiamente sufficiente.
@@ -105,3 +109,11 @@ Foto in D1 (non R2): nessun bucket da creare, limite free 5 GB ampiamente suffic
 - AI dietro un'interfaccia unica (`worker/ai.ts`): modello principale + fallback in `wrangler.jsonc` (`AI_MODEL`, `AI_MODEL_FALLBACK`). L'AI propone, si conferma sempre in app.
 - `receipt_aliases`: riga di scontrino → prodotto, imparata a ogni conferma (migrazione `0004_import.sql`).
 - In locale `wrangler dev` usa Workers AI remoto (serve `wrangler login`).
+
+## Smart (F4)
+
+- **Planner** (`/planner`, tabella `meal_plan`): pranzo/cena per giorno, ricetta + porzioni o nota libera. "Genera lista" somma i fabbisogni dei pasti da oggi a domenica, toglie la dispensa e i sostituti disponibili → `shopping_items` origine `planner`. "Ho cucinato" dal planner segna il pasto fatto.
+- **Notifiche push**: Web Push senza librerie (`worker/webpush.ts`: VAPID ES256 + cifratura aes128gcm). Chiavi VAPID create al primo uso in `server_kv`: nessun secret da configurare. Attivazione per dispositivo in Impostazioni → Notifiche (con invio di prova).
+- **Cron** `*/30 * * * *` (`wrangler.jsonc` → `triggers`): decide in ora italiana (`worker/digest.ts`). 9:30 scadenze, solo se qualcosa entra oggi nella finestra di avviso o scade entro domani. Domenica 18:00 riepilogo: cosa scade, sotto scorta, spesa settimana vs budget, 3 ricette fattibili, pasti pianificati.
+- **Stagionalità** (`src/db/season.js`): frutta e verdura del mese, filtro "di stagione" nel ricettario e nel planner (almeno un ingrediente di stagione e nessuno fuori stagione; conserve escluse).
+- **Stima lista per supermercato**: ultimo prezzo pagato per catena, confrontato solo sui prodotti con prezzo noto in tutte.

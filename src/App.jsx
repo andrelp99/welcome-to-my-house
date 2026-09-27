@@ -11,6 +11,7 @@ import RicettaDettaglio from './pages/RicettaDettaglio.jsx';
 import RicettaForm from './pages/RicettaForm.jsx';
 import Cucina from './pages/Cucina.jsx';
 import RicettaImport from './pages/RicettaImport.jsx';
+import Planner from './pages/Planner.jsx';
 import { Placeholder } from './pages/Placeholder.jsx';
 
 export default function App() {
@@ -27,6 +28,7 @@ export default function App() {
         <Route path="ricette" element={<Ricette />} />
         <Route path="ricette/nuova" element={<RicettaForm key="nuova" />} />
         <Route path="ricette/importa" element={<RicettaImport />} />
+        <Route path="planner" element={<Planner />} />
         <Route path="ricette/:id" element={<RicettaDettaglio />} />
         <Route path="ricette/:id/modifica" element={<RicettaForm key="modifica" />} />
         <Route path="finanze" element={<Placeholder title="Prospetto finanziario" fase="F5" testo="Storico prezzi, budget, proiezioni, sconti e analisi." />} />

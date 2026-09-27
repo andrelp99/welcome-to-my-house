@@ -1,7 +1,8 @@
 import { Link } from 'react-router';
 import { format } from 'date-fns';
 import { it } from 'date-fns/locale';
-import { AlarmClock, ShieldCheck, ShoppingCart, ChefHat, KeyRound, WifiOff } from 'lucide-react';
+import { AlarmClock, ShieldCheck, ShoppingCart, ChefHat, KeyRound, WifiOff, CalendarDays, Leaf } from 'lucide-react';
+import { SEASON, monthName } from '../db/season.js';
 import { Card } from '../components/ui/Card.jsx';
 import { ExpiryBadge, LEVEL_DOT } from '../components/ui/kit.jsx';
 import { useData, useSyncState, useRecipes } from '../hooks/useData.js';
@@ -26,6 +27,9 @@ export default function Home() {
   const below = data ? belowStock(data) : [];
   const spesaEst = data ? data.shopping.reduce((s, x) => s + (data.lastPrice[x.product_id] ?? 0) * (x.qty || 1), 0) : 0;
   const expired = warn.filter((w) => w.st.level === 'expired').length;
+  const month = new Date().getMonth() + 1;
+  const todayISOstr = format(new Date(), 'yyyy-MM-dd');
+  const todayPlan = rec ? rec.plan.filter((e) => e.date === todayISOstr) : [];
   // Ricette fattibili, prima quelle che usano cose in scadenza
   const expiring = new Set(warn.map((w) => w.p.id));
   const cook =
@@ -35,8 +39,8 @@ export default function Home() {
             const ings = rec.ings[r.id] || [];
             return { r, st: recipeStatus(ings, 1, data, rec.subs), urgent: ings.filter((i) => expiring.has(i.product_id)).length };
           })
-          .filter((x) => x.st.feasible)
-          .sort((a, b) => b.urgent - a.urgent || (a.r.last_cooked_at || '').localeCompare(b.r.last_cooked_at || ''))
+          .filter((x) => x.st.feasible || x.st.missing === 1)
+          .sort((a, b) => b.st.feasible - a.st.feasible || b.urgent - a.urgent || (a.r.last_cooked_at || '').localeCompare(b.r.last_cooked_at || ''))
           .slice(0, 3)
       : [];
 
@@ -114,17 +118,49 @@ export default function Home() {
             <p className="text-text-secondary text-sm">{rec?.list.length ? 'Nessuna ricetta fattibile con quello che hai.' : 'Ancora nessuna ricetta.'}</p>
           ) : (
             <ul className="space-y-1.5 text-sm">
-              {cook.map(({ r, urgent }) => (
+              {cook.map(({ r, urgent, st }) => (
                 <li key={r.id}>
                   <Link to={`/ricette/${r.id}`} className="flex justify-between gap-2">
                     <span className="truncate font-medium">{r.title}</span>
-                    {urgent > 0 && <span className="text-brand-accent text-xs shrink-0">usa {urgent} in scadenza</span>}
+                    {urgent > 0 ? (
+                      <span className="text-brand-accent text-xs shrink-0">usa {urgent} in scadenza</span>
+                    ) : !st.feasible ? (
+                      <span className="text-text-muted text-xs shrink-0">manca 1</span>
+                    ) : null}
                   </Link>
                 </li>
               ))}
             </ul>
           )}
           <Link to="/ricette" className="block mt-3 text-brand font-semibold text-sm">Ricettario →</Link>
+        </Card>
+
+        <Card title="Oggi in tavola" icon={CalendarDays}>
+          {todayPlan.length === 0 ? (
+            <p className="text-text-secondary text-sm">Niente in programma.</p>
+          ) : (
+            <ul className="space-y-1.5 text-sm">
+              {todayPlan.map((e) => {
+                const r = e.recipe_id && rec.byId[e.recipe_id];
+                return (
+                  <li key={e.id} className="flex justify-between gap-2">
+                    {r ? (
+                      <Link to={`/ricette/${r.id}?porzioni=${e.servings}&piano=${e.id}`} className={`truncate font-medium ${e.done ? 'line-through text-text-muted' : ''}`}>{r.title}</Link>
+                    ) : (
+                      <span className="truncate">{e.note}</span>
+                    )}
+                    <span className="text-text-muted text-xs shrink-0 capitalize">{e.meal}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <Link to="/planner" className="block mt-3 text-brand font-semibold text-sm">Planner →</Link>
+        </Card>
+
+        <Card title={`Di stagione a ${monthName(month)}`} icon={Leaf}>
+          <p className="text-sm"><span className="text-text-muted">Frutta:</span> {SEASON[month].fruit.join(', ')}</p>
+          <p className="text-sm mt-1"><span className="text-text-muted">Verdura:</span> {SEASON[month].veg.join(', ')}</p>
         </Card>
       </div>
     </div>

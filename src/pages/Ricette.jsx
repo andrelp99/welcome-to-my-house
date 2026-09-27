@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { Plus, Search, Clock, Star, BookOpen, Download } from 'lucide-react';
+import { Plus, Search, Clock, Star, BookOpen, Download, Leaf, CalendarDays } from 'lucide-react';
+import { recipeSeason, monthName } from '../db/season.js';
 import { useData, useRecipes } from '../hooks/useData.js';
 import { Button, Tabs, Empty } from '../components/ui/kit.jsx';
 import { Photo, SubstitutionsPanel } from '../components/recipes.jsx';
@@ -13,15 +14,18 @@ export default function Ricette() {
   const [tab, setTab] = useState('all');
   const [q, setQ] = useState('');
   const [diet, setDiet] = useState([]);
+  const [season, setSeason] = useState(false);
+  const month = new Date().getMonth() + 1;
 
   const rows = useMemo(() => {
     if (!data || !rec) return [];
-    return rec.list.map((r) => ({ r, st: recipeStatus(rec.ings[r.id] || [], 1, data, rec.subs), diet: parseList(r.diet_tags), tags: parseList(r.tags) }));
-  }, [data, rec]);
+    return rec.list.map((r) => ({ r, st: recipeStatus(rec.ings[r.id] || [], 1, data, rec.subs), diet: parseList(r.diet_tags), tags: parseList(r.tags), season: recipeSeason(rec.ings[r.id] || [], month).seasonal }));
+  }, [data, rec, month]);
 
   if (!data || !rec) return null;
   const s = q.trim().toLowerCase();
-  const list = rows.filter(({ r, st, diet: d, tags }) => {
+  const list = rows.filter(({ r, st, diet: d, tags, season: inSeason }) => {
+    if (season && !inSeason) return false;
     if (tab === 'ok' && !st.feasible) return false;
     if (tab === 'fav' && !r.favorite) return false;
     if (diet.length && !diet.every((t) => d.includes(t))) return false;
@@ -42,6 +46,9 @@ export default function Ricette() {
         </div>
         {tab !== 'subs' && (
           <div className="flex gap-2 shrink-0">
+            <Button variant="ghost" aria-label="Planner" onClick={() => nav('/planner')}>
+              <CalendarDays size={18} /> <span className="hidden sm:inline">Planner</span>
+            </Button>
             <Button variant="ghost" aria-label="Importa ricette" onClick={() => nav('/ricette/importa')}>
               <Download size={18} /> <span className="hidden sm:inline">Importa</span>
             </Button>
@@ -77,6 +84,13 @@ export default function Ricette() {
             />
           </div>
           <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setSeason((v) => !v)}
+              className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium border ${season ? 'bg-positive text-white border-positive' : 'border-positive/50 text-positive'}`}
+            >
+              <Leaf size={12} /> di stagione ({monthName(month)})
+            </button>
             {DIET_TAGS.map((t) => (
               <button
                 key={t}
@@ -93,7 +107,7 @@ export default function Ricette() {
             <Empty icon={BookOpen}>{rows.length === 0 ? 'Nessuna ricetta. Crea con + o importa (link, testo, foto, file GZ).' : 'Nessuna ricetta con questi filtri.'}</Empty>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {list.map(({ r, st, diet: d }) => {
+              {list.map(({ r, st, diet: d, season: inSeason }) => {
                 const time = (Number(r.prep_min) || 0) + (Number(r.cook_min) || 0);
                 return (
                   <Link key={r.id} to={`/ricette/${r.id}`} className="flex sm:flex-col gap-3 sm:gap-0 rounded-lg border border-bg-border bg-bg-surface shadow-card overflow-hidden hover:border-brand transition-colors">
@@ -113,6 +127,7 @@ export default function Ricette() {
                       </div>
                       <div className="flex flex-wrap gap-1.5">
                         <StatusChip st={st} />
+                        {inSeason && <Leaf size={14} className="text-positive self-center" aria-label="di stagione" />}
                         {d.slice(0, 2).map((t) => (
                           <span key={t} className="rounded-full border border-bg-border px-2 py-0.5 text-[11px] text-text-secondary">{t}</span>
                         ))}

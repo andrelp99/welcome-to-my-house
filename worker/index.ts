@@ -2,6 +2,8 @@ import { Hono } from 'hono';
 import { push, pull, type Change } from './sync';
 import { extract } from './ai';
 import { fetchPage, recipeFromHtml, htmlToText, fetchImageToFiles, MAX_FILE } from './importer';
+import { getVapid, sendPush, type PushMsg, type Sub } from './webpush';
+import { romeNow, dailyMessage, weeklyMessage } from './digest';
 
 export type Env = {
   DB: D1Database;
@@ -137,6 +139,100 @@ app.post('/ai/receipt', async (c) => {
   }
 });
 
+// ── Notifiche push ──
+async function subId(endpoint: string) {
+  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(endpoint));
+  return [...new Uint8Array(d)].slice(0, 16).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+type SubRow = Sub & { prefs: string | null; fails: number };
+const prefsOf = (r: { prefs: string | null }) => ({ daily: true, weekly: true, ...(r.prefs ? JSON.parse(r.prefs) : {}) });
+
+app.get('/push/key', async (c) => c.json({ publicKey: (await getVapid(c.env.DB)).publicKey }));
+
+app.post('/push/subscribe', async (c) => {
+  const b = await c.req.json<{ endpoint?: string; keys?: { p256dh?: string; auth?: string }; device?: string; prefs?: object }>().catch(() => null);
+  if (!b?.endpoint || !b.keys?.p256dh || !b.keys?.auth || !/^https:\/\//.test(b.endpoint)) return c.json({ error: 'Sottoscrizione non valida' }, 400);
+  const id = await subId(b.endpoint);
+  await c.env.DB.prepare(
+    `INSERT INTO push_subscriptions (id, endpoint, p256dh, auth, device, prefs, created_at, fails) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0)
+     ON CONFLICT(id) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth, device = excluded.device, prefs = COALESCE(excluded.prefs, push_subscriptions.prefs), fails = 0`
+  )
+    .bind(id, b.endpoint, b.keys.p256dh, b.keys.auth, b.device ?? null, b.prefs ? JSON.stringify(b.prefs) : null, Date.now())
+    .run();
+  return c.json({ ok: true, id });
+});
+
+app.post('/push/unsubscribe', async (c) => {
+  const b = await c.req.json<{ endpoint?: string }>().catch(() => null);
+  if (b?.endpoint) await c.env.DB.prepare('DELETE FROM push_subscriptions WHERE id = ?').bind(await subId(b.endpoint)).run();
+  return c.json({ ok: true });
+});
+
+app.post('/push/status', async (c) => {
+  const b = await c.req.json<{ endpoint?: string }>().catch(() => null);
+  const row = b?.endpoint ? await c.env.DB.prepare('SELECT prefs FROM push_subscriptions WHERE id = ?').bind(await subId(b.endpoint)).first<{ prefs: string | null }>() : null;
+  const n = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM push_subscriptions').first<{ n: number }>();
+  return c.json({ subscribed: !!row, prefs: row ? prefsOf(row) : null, devices: n?.n ?? 0 });
+});
+
+app.post('/push/prefs', async (c) => {
+  const b = await c.req.json<{ endpoint?: string; prefs?: object }>().catch(() => null);
+  if (!b?.endpoint || !b.prefs) return c.json({ error: 'Dati mancanti' }, 400);
+  await c.env.DB.prepare('UPDATE push_subscriptions SET prefs = ? WHERE id = ?').bind(JSON.stringify(b.prefs), await subId(b.endpoint)).run();
+  return c.json({ ok: true });
+});
+
+// Prova su questo dispositivo, oppure anteprima di una notifica vera (daily/weekly) inviata subito.
+app.post('/push/test', async (c) => {
+  const b = await c.req.json<{ endpoint?: string; kind?: 'test' | 'daily' | 'weekly' }>().catch(() => null);
+  if (!b?.endpoint) return c.json({ error: 'endpoint mancante' }, 400);
+  const sub = await c.env.DB.prepare('SELECT * FROM push_subscriptions WHERE id = ?').bind(await subId(b.endpoint)).first<SubRow>();
+  if (!sub) return c.json({ error: 'Dispositivo non iscritto' }, 404);
+  const now = romeNow();
+  const msg =
+    b.kind === 'daily'
+      ? (await dailyMessage(c.env.DB, now.date)) ?? { title: 'Scadenze', body: 'Niente in scadenza oggi 👍', url: '/dispensa' }
+      : b.kind === 'weekly'
+        ? await weeklyMessage(c.env.DB, now.date, now.month)
+        : { title: 'Notifiche attive ✅', body: 'Welcome to My House ti avviserà qui.', url: '/' };
+  const r = await sendPush(c.env.DB, sub, msg);
+  if (r === 'gone') await c.env.DB.prepare('DELETE FROM push_subscriptions WHERE id = ?').bind(sub.id).run();
+  return r === true ? c.json({ ok: true, msg }) : c.json({ error: r === 'gone' ? 'Iscrizione scaduta: riattiva' : 'Invio non riuscito' }, 502);
+});
+
+async function broadcast(env: Env, kind: 'daily' | 'weekly', msg: PushMsg) {
+  const subs = (await env.DB.prepare('SELECT * FROM push_subscriptions').all<SubRow>()).results.filter((s) => prefsOf(s)[kind] !== false);
+  let sent = 0;
+  for (const s of subs) {
+    const r = await sendPush(env.DB, s, msg).catch(() => false as const);
+    if (r === true) {
+      sent++;
+      await env.DB.prepare('UPDATE push_subscriptions SET last_ok = ?, fails = 0 WHERE id = ?').bind(Date.now(), s.id).run();
+    } else if (r === 'gone' || s.fails >= 20) await env.DB.prepare('DELETE FROM push_subscriptions WHERE id = ?').bind(s.id).run();
+    else await env.DB.prepare('UPDATE push_subscriptions SET fails = fails + 1 WHERE id = ?').bind(s.id).run();
+  }
+  return sent;
+}
+
+// Una volta per data e tipo, anche se il cron scatta due volte.
+async function once(env: Env, key: string, value: string) {
+  const r = await env.DB.prepare('INSERT INTO server_kv (k, v) VALUES (?1, ?2) ON CONFLICT(k) DO UPDATE SET v = ?2 WHERE v <> ?2').bind(key, value).run();
+  return (r.meta.changes ?? 0) > 0;
+}
+
+// Cron ogni 30 minuti; decide in ora italiana: 9:30 scadenze, domenica 18:00 riepilogo.
+async function scheduled(_e: ScheduledController, env: Env) {
+  const now = romeNow();
+  if (now.hour === 9 && now.minute >= 30 && (await once(env, 'last_daily', now.date))) {
+    const msg = await dailyMessage(env.DB, now.date);
+    if (msg) console.log(JSON.stringify({ level: 'info', msg: 'push scadenze', sent: await broadcast(env, 'daily', msg) }));
+  }
+  if (now.weekday === 'Sun' && now.hour === 18 && now.minute < 30 && (await once(env, 'last_weekly', now.date))) {
+    const msg = await weeklyMessage(env.DB, now.date, now.month);
+    console.log(JSON.stringify({ level: 'info', msg: 'push settimana', sent: await broadcast(env, 'weekly', msg) }));
+  }
+}
+
 // Cronologia modifiche (tutti i dispositivi).
 app.get('/history', async (c) => {
   const limit = Math.min(Number(c.req.query('limit')) || 50, 200);
@@ -161,4 +257,7 @@ function safeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-export default app;
+export default {
+  fetch: app.fetch,
+  scheduled: (e: ScheduledController, env: Env, ctx: ExecutionContext) => ctx.waitUntil(scheduled(e, env)),
+} satisfies ExportedHandler<Env>;

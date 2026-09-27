@@ -212,11 +212,12 @@ export function recipeStatus(ings, scale, data, subs) {
 
 // Raggruppa le righe delle tabelle figlie per ricetta.
 export async function loadRecipes() {
-  const [recipes, ings, steps, subs] = await Promise.all([
+  const [recipes, ings, steps, subs, plan] = await Promise.all([
     db.recipes.toArray(),
     db.recipe_ingredients.toArray(),
     db.recipe_steps.toArray(),
     db.substitutions.toArray(),
+    db.meal_plan.toArray(),
   ]);
   const group = (arr) => {
     const g = {};
@@ -233,6 +234,7 @@ export async function loadRecipes() {
     steps: group(steps),
     subs: subsBy,
     subList: subs.filter(alive),
+    plan: plan.filter(alive).sort((a, b) => a.date.localeCompare(b.date) || (a.meal === b.meal ? 0 : a.meal === 'pranzo' ? -1 : 1)),
   };
 }
 

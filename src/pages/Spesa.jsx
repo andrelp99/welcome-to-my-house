@@ -9,7 +9,7 @@ import { readReceipt, normRaw, lineQty } from '../db/receipt.js';
 import { ProductForm } from '../components/forms.jsx';
 import { PhotoList } from './RicettaImport.jsx';
 
-const ORIGIN = { scorta: { label: 'scorta', cls: 'text-brand-accent border-brand-accent/50' }, preferito: { label: '★', cls: 'text-brand border-brand/50' }, ricetta: { label: 'ricetta', cls: 'text-positive border-positive/50' } };
+const ORIGIN = { scorta: { label: 'scorta', cls: 'text-brand-accent border-brand-accent/50' }, preferito: { label: '★', cls: 'text-brand border-brand/50' }, ricetta: { label: 'ricetta', cls: 'text-positive border-positive/50' }, planner: { label: 'planner', cls: 'text-positive border-positive/50' } };
 
 export default function Spesa() {
   const data = useData();
@@ -38,6 +38,15 @@ export default function Spesa() {
   }, [data]);
 
   if (!data) return null;
+  // stima per supermercato: solo prodotti con un prezzo noto in ogni catena confrontata, cosi' e' equa
+  const open = data.shopping.filter((s) => s.product_id && !s.checked);
+  const chains = Object.keys(data.lastPriceByChain);
+  const common = open.filter((s) => chains.every((c) => data.lastPriceByChain[c][s.product_id] != null));
+  const byChain = common.length
+    ? chains
+        .map((chain) => ({ chain, n: open.length, known: common.length, total: common.reduce((t, s) => t + data.lastPriceByChain[chain][s.product_id] * (s.qty || 1), 0) }))
+        .sort((a, b) => a.total - b.total)
+    : [];
   const inList = new Set(data.shopping.map((s) => s.product_id).filter(Boolean));
   const checked = data.shopping.filter((s) => s.checked);
 
@@ -74,6 +83,17 @@ export default function Spesa() {
             {data.shopping.length} voci · stima {euro(groups.total)}
             {groups.known < data.shopping.length && groups.known > 0 ? ` (prezzo noto per ${groups.known})` : ''}
           </p>
+          {byChain.length > 1 && (
+            <p className="text-xs text-text-muted mt-0.5">
+              {byChain.map((c, i) => (
+                <span key={c.chain} className={i === 0 ? 'text-positive font-semibold' : ''}>
+                  {i ? ' · ' : ''}
+                  {c.chain} {euro(c.total)}
+                  {c.known < c.n ? ` (${c.known}/${c.n})` : ''}
+                </span>
+              ))}
+            </p>
+          )}
         </div>
         <div className="flex gap-2 shrink-0">
           <Button variant="ghost" aria-label="Leggi scontrino" onClick={() => setScan(true)}>
@@ -122,7 +142,7 @@ export default function Spesa() {
                       {price != null ? `~${euro(price)}` : 'prezzo ?'}
                       {p ? ` · in casa ${fmtQty(data.stock[p.id] || 0)} ${p.default_unit}` : ''}
                       {p?.alternatives ? ` · ok anche: ${p.alternatives}` : ''}
-                      {it.origin === 'ricetta' && it.note ? ` · per ${it.note}` : ''}
+                      {(it.origin === 'ricetta' || it.origin === 'planner') && it.note ? ` · per ${it.note}` : ''}
                     </div>
                   </div>
                   <Stepper value={Number(it.qty || 1)} unit={it.unit || 'pz'} min={0} onChange={(v) => put('shopping_items', { id: it.id, qty: v })} />

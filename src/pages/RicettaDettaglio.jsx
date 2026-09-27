@@ -21,6 +21,7 @@ export default function RicettaDettaglio() {
   const [cooked, setCooked] = useState(false);
   const [linking, setLinking] = useState(null);
   const [creating, setCreating] = useState(null);
+  const planId = params.get('piano');
 
   useEffect(() => {
     if (recipe && servings == null) setServings(Number(params.get('porzioni')) || recipe.servings || 1);
@@ -129,7 +130,7 @@ export default function RicettaDettaglio() {
             ))}
           </div>
           <div className="flex flex-wrap gap-2 pt-1 print:hidden">
-            <Button onClick={() => nav(`/ricette/${id}/cucina?porzioni=${servings}`)} disabled={!steps.length}>
+            <Button onClick={() => nav(`/ricette/${id}/cucina?porzioni=${servings}${planId ? `&piano=${planId}` : ''}`)} disabled={!steps.length}>
               <UtensilsCrossed size={16} /> Cucina
             </Button>
             <Button variant="ghost" onClick={() => setCooked(true)}>
@@ -192,7 +193,7 @@ export default function RicettaDettaglio() {
         </section>
       )}
 
-      {cooked && <CookedModal recipe={recipe} status={status} servings={servings || recipe.servings} data={data} onClose={() => setCooked(false)} />}
+      {cooked && <CookedModal recipe={recipe} status={status} servings={servings || recipe.servings} data={data} onClose={(ok) => { setCooked(false); if (ok && planId) put('meal_plan', { id: planId, done: 1 }); }} />}
       {linking && (
         <LinkModal
           ing={linking}

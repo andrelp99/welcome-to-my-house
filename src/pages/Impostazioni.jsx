@@ -1,10 +1,11 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { KeyRound, Palette, Info, RefreshCw, History, Undo2, Download, Upload, BookMarked } from 'lucide-react';
+import { KeyRound, Palette, Info, RefreshCw, History, Undo2, Download, Upload, BookMarked, Bell } from 'lucide-react';
 import { Card } from '../components/ui/Card.jsx';
 import { ThemeToggle } from '../components/ui/ThemeToggle.jsx';
-import { Button } from '../components/ui/kit.jsx';
+import { Button, Toggle } from '../components/ui/kit.jsx';
+import { pushSupported, enablePush, disablePush, pushStatus, setPushPrefs, testPush } from '../db/push.js';
 import { getHouseKey } from '../api/client.js';
 import { useSyncState, showToast } from '../hooks/useData.js';
 import { syncNow } from '../db/sync.js';
@@ -69,6 +70,8 @@ export default function Impostazioni() {
         </div>
       </Card>
 
+      <Notifiche />
+
       <Card title="Cronologia (questo dispositivo)" icon={History}>
         {!history?.length ? (
           <p className="text-text-secondary text-sm">Nessuna modifica registrata.</p>
@@ -110,8 +113,64 @@ export default function Impostazioni() {
         <p className="text-text-secondary text-sm">{key ? 'Dispositivo attivato.' : 'Dispositivo non attivato: apri il link di attivazione.'}</p>
       </Card>
       <Card title="Versione" icon={Info}>
-        <p className="text-text-secondary text-sm">0.4.0 · fase F3</p>
+        <p className="text-text-secondary text-sm">0.5.0 · fase F4</p>
       </Card>
     </div>
+  );
+}
+
+function Notifiche() {
+  const [st, setSt] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const supported = pushSupported();
+  const refresh = () => pushStatus().then(setSt).catch((e) => setSt({ error: e.message }));
+  useEffect(() => {
+    if (supported) refresh();
+  }, [supported]);
+  async function run(fn, ok) {
+    setBusy(true);
+    try {
+      await fn();
+      if (ok) showToast(ok);
+      await refresh();
+    } catch (e) {
+      showToast(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  const prefs = st?.prefs || { daily: true, weekly: true };
+  const setPref = (k, v) => run(() => setPushPrefs({ ...prefs, [k]: v }));
+  return (
+    <Card title="Notifiche" icon={Bell} accent="accent">
+      {!supported ? (
+        <p className="text-sm text-text-secondary">Questo browser non supporta le notifiche. Su Android usa l’app installata da Chrome.</p>
+      ) : (
+        <div className="space-y-3 text-sm">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="font-semibold">{st?.subscribed ? 'Attive su questo dispositivo' : 'Non attive su questo dispositivo'}</div>
+              <div className="text-text-muted text-xs">{st?.error || `${st?.devices ?? 0} dispositivi iscritti`}</div>
+            </div>
+            {st?.subscribed ? (
+              <Button variant="ghost" disabled={busy} onClick={() => run(disablePush, 'Notifiche disattivate')}>Disattiva</Button>
+            ) : (
+              <Button disabled={busy} onClick={() => run(async () => { await enablePush(); await testPush('test'); }, 'Notifiche attive: arriva una prova')}>Attiva</Button>
+            )}
+          </div>
+          {st?.subscribed && (
+            <>
+              <Toggle checked={prefs.daily !== false} onChange={(v) => setPref('daily', v)} label="Scadenze ogni giorno alle 9:30 (solo se serve)" />
+              <Toggle checked={prefs.weekly !== false} onChange={(v) => setPref('weekly', v)} label="Riepilogo domenica alle 18:00" />
+              <div className="flex flex-wrap gap-2 pt-1">
+                <Button variant="ghost" disabled={busy} onClick={() => run(() => testPush('daily'), 'Inviata anteprima scadenze')}>Prova scadenze</Button>
+                <Button variant="ghost" disabled={busy} onClick={() => run(() => testPush('weekly'), 'Inviato riepilogo di prova')}>Prova riepilogo</Button>
+              </div>
+            </>
+          )}
+          <p className="text-xs text-text-muted">Anticipo scadenze per luogo: frigo 3 gg, dispensa 7, freezer 14, farmacia 30.</p>
+        </div>
+      )}
+    </Card>
   );
 }

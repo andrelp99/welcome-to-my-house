@@ -41,7 +41,7 @@ export function daysLabel(days) {
 
 // Carica tutto quello che serve alle viste inventario in un colpo solo (dataset piccolo).
 export async function loadAll() {
-  const [products, lots, locations, categories, shopping, lines, stores] = await Promise.all([
+  const [products, lots, locations, categories, shopping, lines, stores, receipts] = await Promise.all([
     db.products.toArray(),
     db.stock_lots.toArray(),
     db.locations.toArray(),
@@ -49,6 +49,7 @@ export async function loadAll() {
     db.shopping_items.toArray(),
     db.purchase_lines.toArray(),
     db.stores.toArray(),
+    db.receipts.toArray(),
   ]);
   const byId = (arr) => Object.fromEntries(arr.filter(alive).map((r) => [r.id, r]));
   const P = byId(products);
@@ -62,6 +63,14 @@ export async function loadAll() {
   const liveLines = lines.filter(alive).sort((a, b) => a.updated_at - b.updated_at);
   for (const pl of liveLines)
     if (pl.price_paid != null && pl.qty) lastPrice[pl.product_id] = pl.price_paid / pl.qty;
+  // ultimo prezzo per catena (stima lista per supermercato)
+  const S = byId(stores);
+  const R = byId(receipts);
+  const lastPriceByChain = {};
+  for (const pl of liveLines) {
+    const chain = S[R[pl.receipt_id]?.store_id]?.chain;
+    if (chain && pl.price_paid != null && pl.qty && pl.product_id) (lastPriceByChain[chain] ||= {})[pl.product_id] = pl.price_paid / pl.qty;
+  }
   return {
     products: P,
     locations: L,
@@ -70,6 +79,7 @@ export async function loadAll() {
     lots: liveLots,
     stock,
     lastPrice,
+    lastPriceByChain,
     shopping: shopping.filter(alive),
     locationList: Object.values(L).sort((a, b) => a.sort - b.sort),
     categoryList: Object.values(C).sort((a, b) => a.sort - b.sort),

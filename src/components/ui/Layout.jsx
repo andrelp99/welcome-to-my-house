@@ -1,5 +1,5 @@
 import { NavLink, Outlet, Link } from 'react-router';
-import { Home, SprayCan, Refrigerator, ShoppingCart, BookOpen, PiggyBank, Settings } from 'lucide-react';
+import { Home, SprayCan, Refrigerator, ShoppingCart, BookOpen, PiggyBank, Settings, CalendarDays } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle.jsx';
 import { useSyncState, useToast } from '../../hooks/useData.js';
 
@@ -31,6 +31,7 @@ export const NAV = [
   { to: '/dispensa', label: 'Dispensa', icon: Refrigerator },
   { to: '/spesa', label: 'Spesa', icon: ShoppingCart },
   { to: '/ricette', label: 'Ricette', icon: BookOpen },
+  { to: '/planner', label: 'Planner', icon: CalendarDays, side: true }, // sul telefono: da Home e Ricette
   { to: '/finanze', label: 'Finanze', icon: PiggyBank },
 ];
 
@@ -111,7 +112,7 @@ export function Layout() {
           className="print:hidden md:hidden fixed bottom-0 inset-x-0 z-20 grid grid-cols-6 bg-bg-surface border-t border-bg-border"
           style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
         >
-          {NAV.map(({ to, label, icon: Icon, end }) => (
+          {NAV.filter((n) => !n.side).map(({ to, label, icon: Icon, end }) => (
             <NavLink
               key={to}
               to={to}

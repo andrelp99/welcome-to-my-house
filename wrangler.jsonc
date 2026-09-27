@@ -18,6 +18,9 @@
       "migrations_dir": "migrations"
     }
   ],
+  "triggers": {
+    "crons": ["*/30 * * * *"]
+  },
   "ai": {
     "binding": "AI"
   },

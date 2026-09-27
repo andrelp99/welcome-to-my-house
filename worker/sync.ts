@@ -27,6 +27,7 @@ export const TABLES: Record<string, string[]> = {
   substitutions: ['id', 'product_id', 'substitute_id', 'ratio', 'note'],
   events: ['id', 'type', 'product_id', 'recipe_id', 'qty', 'unit', 'value', 'date', 'note'],
   receipt_aliases: ['id', 'text', 'product_id', 'store_chain'],
+  meal_plan: ['id', 'date', 'meal', 'recipe_id', 'servings', 'note', 'done'],
 };
 const TABLE_ORDER = Object.keys(TABLES); // ordine utile per le foreign key
 
