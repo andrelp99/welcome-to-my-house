@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { Trash2, Snowflake, PackageOpen } from 'lucide-react';
+import { Trash2, Snowflake, PackageOpen, Check } from 'lucide-react';
 import { Modal, Field, Input, Select, Toggle, Button, ProductPicker, Stepper } from './ui/kit.jsx';
 import { put, save } from '../db/repo.js';
-import { UNITS, todayISO, autoAddBelowStock, minStock } from '../db/logic.js';
+import { UNITS, todayISO, autoAddBelowStock, minStock, closeLot } from '../db/logic.js';
 import { showToast } from '../hooks/useData.js';
 import { undo } from '../db/repo.js';
 
@@ -159,10 +159,9 @@ export function LotForm({ data, area, lot, presetProduct, onClose }) {
     await autoAddBelowStock();
     onClose();
   }
-  async function del() {
-    await put('stock_lots', { id: lot.id, deleted: 1 }, `Tolto ${product.name}`);
-    showToast(`Tolto ${product.name}`, { label: 'Annulla', run: () => undo() });
-    await autoAddBelowStock();
+  async function close(type) {
+    await closeLot(lot, product, data, type);
+    showToast(`${type === 'buttato' ? 'Buttato' : 'Finito'} ${product.name}`, { label: 'Annulla', run: () => undo() });
     onClose();
   }
 
@@ -176,9 +175,16 @@ export function LotForm({ data, area, lot, presetProduct, onClose }) {
       footer={
         <>
           {lot && (
-            <Button variant="ghost" className="mr-auto text-negative" onClick={del}>
-              <Trash2 size={16} /> Finito
-            </Button>
+            <div className="mr-auto flex gap-2">
+              <Button variant="ghost" onClick={() => close('consumo')}>
+                <Check size={16} /> Finito
+              </Button>
+              {product?.area === 'cibo' && (
+                <Button variant="ghost" className="text-negative" onClick={() => close('buttato')}>
+                  <Trash2 size={16} /> Buttato
+                </Button>
+              )}
+            </div>
           )}
           <Button variant="ghost" onClick={onClose}>Annulla</Button>
           <Button onClick={submit} disabled={!product || !(Number(f.qty) > 0)}>Salva</Button>

@@ -135,3 +135,49 @@ export async function weeklyMessage(db: D1Database, today: string, month: string
   parts.push(planned?.n ? `Pianificati ${planned.n} pasti` : 'Settimana da pianificare');
   return { title: 'Riepilogo della settimana', body: parts.join('\n'), url: planned?.n ? '/planner' : '/', tag: 'settimana' };
 }
+
+const prevMonthOf = (month: string, n = 1) => {
+  const d = new Date(Date.UTC(+month.slice(0, 4), +month.slice(5, 7) - 1 - n, 1));
+  return d.toISOString().slice(0, 7);
+};
+
+async function monthSpent(db: D1Database, month: string) {
+  const r = await db
+    .prepare(
+      "SELECT (SELECT COALESCE(SUM(total_paid), 0) FROM receipts WHERE deleted = 0 AND substr(date, 1, 7) = ?1) + (SELECT COALESCE(SUM(amount), 0) FROM extra_expenses WHERE deleted = 0 AND substr(date, 1, 7) = ?1) AS t"
+    )
+    .bind(month)
+    .first<{ t: number }>();
+  return r?.t || 0;
+}
+
+// Il 1° del mese: speso vs budget, confronto col mese prima, 3 affari migliori, sprechi.
+export async function monthlyMessage(db: D1Database, currentMonth: string) {
+  const m = prevMonthOf(currentMonth, 1);
+  const m2 = prevMonthOf(currentMonth, 2);
+  const [spent, before, budgets, best, saved, waste] = await Promise.all([
+    monthSpent(db, m),
+    monthSpent(db, m2),
+    all(db, 'SELECT area, amount, month FROM budgets WHERE deleted = 0 AND month <= ? ORDER BY month DESC, updated_at DESC', m),
+    all(
+      db,
+      `SELECT p.name AS name, pl.discount AS discount FROM purchase_lines pl JOIN receipts r ON r.id = pl.receipt_id LEFT JOIN products p ON p.id = pl.product_id
+       WHERE pl.deleted = 0 AND r.deleted = 0 AND substr(r.date, 1, 7) = ? AND pl.discount > 0 ORDER BY pl.discount DESC LIMIT 3`,
+      m
+    ),
+    db.prepare('SELECT COALESCE(SUM(total_discount), 0) AS t FROM receipts WHERE deleted = 0 AND substr(date, 1, 7) = ?').bind(m).first<{ t: number }>(),
+    db.prepare("SELECT COALESCE(SUM(value), 0) AS t FROM events WHERE deleted = 0 AND type = 'buttato' AND substr(date, 1, 7) = ?").bind(m).first<{ t: number }>(),
+  ]);
+  const seen = new Set<string>();
+  const budget = budgets.filter((b) => !seen.has(b.area) && seen.add(b.area)).reduce((s, b) => s + (b.amount || 0), 0);
+  const name = new Date(`${m}-15T12:00:00Z`).toLocaleDateString('it-IT', { month: 'long', timeZone: TZ });
+  const parts = [`Speso ${euro(spent)}${budget ? ` su ${euro(budget)} di budget${spent > budget ? ' (sforato)' : ''}` : ''}`];
+  if (before > 0) {
+    const pct = Math.round((spent / before - 1) * 100);
+    parts.push(pct === 0 ? 'Come il mese prima' : `${pct > 0 ? '+' : ''}${pct}% rispetto al mese prima`);
+  }
+  if (saved?.t) parts.push(`Risparmiato con le offerte ${euro(saved.t)}`);
+  if (best.length) parts.push(`Affari: ${best.map((b) => `${b.name || 'articolo'} −${euro(b.discount)}`).join(', ')}`);
+  if (waste?.t) parts.push(`Buttato ${euro(waste.t)} di cibo`);
+  return { title: `Report di ${name}`, body: parts.join('\n'), url: '/finanze', tag: 'mese' };
+}

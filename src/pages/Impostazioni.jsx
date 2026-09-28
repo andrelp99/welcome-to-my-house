@@ -113,7 +113,7 @@ export default function Impostazioni() {
         <p className="text-text-secondary text-sm">{key ? 'Dispositivo attivato.' : 'Dispositivo non attivato: apri il link di attivazione.'}</p>
       </Card>
       <Card title="Versione" icon={Info}>
-        <p className="text-text-secondary text-sm">0.5.0 · fase F4</p>
+        <p className="text-text-secondary text-sm">0.6.0 · fase F5</p>
       </Card>
     </div>
   );
@@ -139,7 +139,7 @@ function Notifiche() {
       setBusy(false);
     }
   }
-  const prefs = st?.prefs || { daily: true, weekly: true };
+  const prefs = st?.prefs || { daily: true, weekly: true, monthly: true };
   const setPref = (k, v) => run(() => setPushPrefs({ ...prefs, [k]: v }));
   return (
     <Card title="Notifiche" icon={Bell} accent="accent">
@@ -162,9 +162,11 @@ function Notifiche() {
             <>
               <Toggle checked={prefs.daily !== false} onChange={(v) => setPref('daily', v)} label="Scadenze ogni giorno alle 9:30 (solo se serve)" />
               <Toggle checked={prefs.weekly !== false} onChange={(v) => setPref('weekly', v)} label="Riepilogo domenica alle 18:00" />
+              <Toggle checked={prefs.monthly !== false} onChange={(v) => setPref('monthly', v)} label="Report mensile il 1° alle 9:30" />
               <div className="flex flex-wrap gap-2 pt-1">
                 <Button variant="ghost" disabled={busy} onClick={() => run(() => testPush('daily'), 'Inviata anteprima scadenze')}>Prova scadenze</Button>
                 <Button variant="ghost" disabled={busy} onClick={() => run(() => testPush('weekly'), 'Inviato riepilogo di prova')}>Prova riepilogo</Button>
+                <Button variant="ghost" disabled={busy} onClick={() => run(() => testPush('monthly'), 'Inviato report di prova')}>Prova report</Button>
               </div>
             </>
           )}

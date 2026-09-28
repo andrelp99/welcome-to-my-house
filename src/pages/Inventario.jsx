@@ -1,13 +1,19 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router';
-import { Plus, ListChecks, BookMarked, Search, ChevronDown, Pencil, Snowflake, PackageOpen, Flame, ShieldCheck, Star, Minus } from 'lucide-react';
-import { useData } from '../hooks/useData.js';
+import { Plus, ListChecks, BookMarked, Search, ChevronDown, Pencil, Snowflake, PackageOpen, Flame, ShieldCheck, Star, Minus, Trash2 } from 'lucide-react';
+import { useData, showToast } from '../hooks/useData.js';
+import { undo } from '../db/repo.js';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db } from '../db/db.js';
+import { depletion } from '../db/finance.js';
 import { Button, IconButton, Tabs, Stepper, ExpiryBadge, Empty, LEVEL_DOT } from '../components/ui/kit.jsx';
 import { LotForm, ProductForm, quickLotAction } from '../components/forms.jsx';
-import { lotStatus, LEVEL_ORDER, fmtQty, setTotalQty, minStock, stepFor } from '../db/logic.js';
+import { lotStatus, LEVEL_ORDER, fmtQty, setTotalQty, minStock, stepFor, closeLot } from '../db/logic.js';
 
 export default function Inventario({ area, title, subtitle }) {
   const data = useData();
+  const consumi = useLiveQuery(() => db.events.where('type').equals('consumo').toArray(), []);
+  const left = useMemo(() => (data && consumi ? Object.fromEntries(depletion(consumi, data).map((x) => [x.p.id, x.days])) : {}), [data, consumi]);
   const [tab, setTab] = useState('all');
   const [q, setQ] = useState('');
   const [count, setCount] = useState(false);
@@ -109,7 +115,7 @@ export default function Inventario({ area, title, subtitle }) {
           <h2 className="text-xs uppercase tracking-wider font-semibold text-text-muted px-1">{c.name}</h2>
           <div className="rounded-lg border border-bg-border bg-bg-surface divide-y divide-bg-border overflow-hidden">
             {items.map((r) => (
-              <ProductRow key={r.p.id} r={r} data={data} count={count} open={open === r.p.id} onToggle={() => setOpen(open === r.p.id ? null : r.p.id)} setModal={setModal} />
+              <ProductRow key={r.p.id} r={r} data={data} left={left[r.p.id]} count={count} open={open === r.p.id} onToggle={() => setOpen(open === r.p.id ? null : r.p.id)} setModal={setModal} />
             ))}
           </div>
         </section>
@@ -121,7 +127,7 @@ export default function Inventario({ area, title, subtitle }) {
   );
 }
 
-function ProductRow({ r, data, count, open, onToggle, setModal }) {
+function ProductRow({ r, data, left, count, open, onToggle, setModal }) {
   const { p, lots, worst, total, min } = r;
   const under = min != null && total < min;
   const unit = lots[0]?.lot.unit || p.default_unit;
@@ -140,6 +146,7 @@ function ProductRow({ r, data, count, open, onToggle, setModal }) {
               {fmtQty(total)} {unit}
               {lots.length > 1 ? ` · ${lots.length} lotti` : ''}
               {min != null ? ` · min ${fmtQty(min)}` : ''}
+              {left != null && left <= 14 ? ` · finisce ~${left === 0 ? 'oggi' : `${left} gg`}` : ''}
             </div>
           )}
         </button>
@@ -179,6 +186,17 @@ function ProductRow({ r, data, count, open, onToggle, setModal }) {
                 {p.area === 'cibo' && (
                   <IconButton label={frozen ? 'Scongela' : 'Congela'} onClick={() => quickLotAction(frozen ? 'thaw' : 'freeze', lot, p)}>
                     <Snowflake size={16} className={frozen ? 'text-brand' : ''} />
+                  </IconButton>
+                )}
+                {p.area === 'cibo' && (st.level === 'expired' || st.level === 'soon') && (
+                  <IconButton
+                    label="Buttato"
+                    onClick={async () => {
+                      await closeLot(lot, p, data, 'buttato');
+                      showToast(`Buttato ${p.name}`, { label: 'Annulla', run: () => undo() });
+                    }}
+                  >
+                    <Trash2 size={16} className="text-negative" />
                   </IconButton>
                 )}
                 <IconButton label="Modifica" onClick={() => setModal({ kind: 'lot', lot })}><Pencil size={16} /></IconButton>

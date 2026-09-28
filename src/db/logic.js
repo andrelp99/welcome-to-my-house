@@ -60,9 +60,13 @@ export async function loadAll() {
   for (const l of liveLots) stock[l.product_id] = (stock[l.product_id] || 0) + Number(l.qty);
   // ultimo prezzo pagato per prodotto (stima costo lista)
   const lastPrice = {};
+  const linePrice = {}; // prezzo unitario della riga d'acquisto (valore esatto del lotto)
   const liveLines = lines.filter(alive).sort((a, b) => a.updated_at - b.updated_at);
   for (const pl of liveLines)
-    if (pl.price_paid != null && pl.qty) lastPrice[pl.product_id] = pl.price_paid / pl.qty;
+    if (pl.price_paid != null && pl.qty) {
+      lastPrice[pl.product_id] = pl.price_paid / pl.qty;
+      linePrice[pl.id] = pl.price_paid / pl.qty;
+    }
   // ultimo prezzo per catena (stima lista per supermercato)
   const S = byId(stores);
   const R = byId(receipts);
@@ -80,6 +84,7 @@ export async function loadAll() {
     stock,
     lastPrice,
     lastPriceByChain,
+    linePrice,
     shopping: shopping.filter(alive),
     locationList: Object.values(L).sort((a, b) => a.sort - b.sort),
     categoryList: Object.values(C).sort((a, b) => a.sort - b.sort),
@@ -138,15 +143,43 @@ export async function setTotalQty(product, target, data) {
       });
   } else {
     let toTake = -diff;
+    let value = 0;
+    let known = false;
     for (const l of lots) {
       if (toTake <= 0) break;
       const take = Math.min(Number(l.qty), toTake);
       toTake -= take;
+      const v = lotValue(l, take, data);
+      if (v != null) {
+        value += v;
+        known = true;
+      }
       const left = Math.round((Number(l.qty) - take) * 1000) / 1000;
       ops.push({ table: 'stock_lots', row: left > 0 ? { id: l.id, qty: left } : { id: l.id, qty: 0, deleted: 1 } });
     }
+    // consumo registrato: serve a previsione esaurimento e statistiche
+    ops.push({ table: 'events', row: { type: 'consumo', product_id: product.id, qty: Math.round((-diff - toTake) * 1000) / 1000, unit: product.default_unit, value: known ? Math.round(value * 100) / 100 : null, date: todayISO() } });
   }
   await save(ops, `${product.name}: ${fmtQty(current)} → ${fmtQty(target)}`);
+  await autoAddBelowStock();
+}
+
+// Valore in euro di una quantita' di un lotto: prezzo della sua riga d'acquisto, altrimenti ultimo prezzo pagato.
+export function lotValue(lot, qty, data) {
+  const unit = data.linePrice?.[lot.purchase_line_id] ?? data.lastPrice?.[lot.product_id];
+  return unit != null ? Math.round(unit * qty * 100) / 100 : null;
+}
+
+// Lotto finito (consumo) o buttato (spreco): toglie il lotto e registra l'evento.
+export async function closeLot(lot, product, data, type = 'consumo') {
+  const qty = Number(lot.qty);
+  await save(
+    [
+      { table: 'stock_lots', row: { id: lot.id, qty: 0, deleted: 1 } },
+      { table: 'events', row: { type, product_id: product.id, qty, unit: lot.unit || product.default_unit, value: lotValue(lot, qty, data), date: todayISO() } },
+    ],
+    `${type === 'buttato' ? 'Buttato' : 'Finito'} ${product.name}`
+  );
   await autoAddBelowStock();
 }
 

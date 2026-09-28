@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { ShoppingCart, Star, Trash2, Check, Store, Receipt, ShieldCheck, ScanLine, Loader2, Sparkles } from 'lucide-react';
+import { ShoppingCart, Star, Trash2, Check, Store, Receipt, ShieldCheck, ScanLine, Loader2, Sparkles, Share2, ShoppingBasket } from 'lucide-react';
+import { useWakeLock } from '../hooks/useWakeLock.js';
 import { useData, showToast } from '../hooks/useData.js';
 import { Button, IconButton, Modal, Field, Input, Select, Stepper, ProductPicker, Empty } from '../components/ui/kit.jsx';
 import { put, save, undo } from '../db/repo.js';
@@ -16,6 +17,8 @@ export default function Spesa() {
   const [checkin, setCheckin] = useState(false);
   const [scan, setScan] = useState(false);
   const [ocr, setOcr] = useState(null);
+  const [shop, setShop] = useState(false);
+  const awake = useWakeLock(shop);
 
   const groups = useMemo(() => {
     if (!data) return { list: [], total: 0, known: 0 };
@@ -69,6 +72,26 @@ export default function Spesa() {
     const n = await autoAddBelowStock();
     showToast(n ? `Aggiunti ${n} essenziali sotto scorta` : 'Nessun essenziale sotto scorta da aggiungere');
   }
+  // Lista come testo (WhatsApp ecc.): solo cio' che resta da prendere, per categoria
+  async function shareList() {
+    const lines = ['🛒 Lista spesa'];
+    for (const { c, items } of groups.list) {
+      const todo = items.filter((x) => !x.it.checked);
+      if (!todo.length) continue;
+      lines.push('', `${c.name}:`);
+      for (const { it, p } of todo) lines.push(`- ${p?.name || it.free_text}${it.qty && !(it.qty === 1 && (it.unit || 'pz') === 'pz') ? ` ${fmtQty(it.qty)} ${it.unit || ''}`.trimEnd() : ''}`);
+    }
+    const text = lines.join('\n');
+    try {
+      if (navigator.share) await navigator.share({ title: 'Lista spesa', text });
+      else {
+        await navigator.clipboard.writeText(text);
+        showToast('Lista copiata negli appunti');
+      }
+    } catch {
+      /* condivisione annullata */
+    }
+  }
   async function clearChecked() {
     await save(checked.map((s) => ({ table: 'shopping_items', row: { id: s.id, deleted: 1 } })), 'Svuotati spuntati');
     showToast('Tolti gli spuntati', { label: 'Annulla', run: () => undo() });
@@ -108,6 +131,10 @@ export default function Spesa() {
       <div className="rounded-lg border border-bg-border bg-bg-surface p-4 space-y-3">
         <ProductPicker products={data.products} onPick={addProduct} onCreate={addFree} placeholder="Aggiungi alla lista…" />
         <div className="flex flex-wrap gap-2">
+          <Button variant={shop ? 'primary' : 'ghost'} onClick={() => setShop((v) => !v)}>
+            <ShoppingBasket size={16} /> {shop ? `Modalità spesa${awake ? ' · schermo acceso' : ''}` : 'Modalità spesa'}
+          </Button>
+          <Button variant="ghost" onClick={shareList} disabled={!data.shopping.some((s) => !s.checked)}><Share2 size={16} /> Condividi</Button>
           <Button variant="ghost" onClick={addFavorites}><Star size={16} /> Preferiti</Button>
           <Button variant="ghost" onClick={addBelow}><ShieldCheck size={16} /> Sotto scorta ({belowStock(data).length})</Button>
           {checked.length > 0 && <Button variant="ghost" onClick={clearChecked}><Trash2 size={16} /> Togli spuntati</Button>}
@@ -124,29 +151,33 @@ export default function Spesa() {
               const name = p?.name || it.free_text;
               const o = ORIGIN[it.origin];
               return (
-                <div key={it.id} className={`flex items-center gap-3 px-3 py-2.5 ${it.checked ? 'opacity-50' : ''}`}>
+                <div key={it.id} className={`flex items-center gap-3 px-3 ${shop ? 'py-4 text-lg' : 'py-2.5'} ${it.checked ? 'opacity-50' : ''}`}>
                   <button
                     type="button"
                     aria-label={it.checked ? 'Togli dal carrello' : 'Nel carrello'}
                     onClick={() => put('shopping_items', { id: it.id, checked: it.checked ? 0 : 1 })}
-                    className={`w-7 h-7 shrink-0 rounded-md border-2 flex items-center justify-center ${it.checked ? 'bg-brand border-brand text-brand-on' : 'border-bg-border'}`}
+                    className={`${shop ? 'w-10 h-10' : 'w-7 h-7'} shrink-0 rounded-md border-2 flex items-center justify-center ${it.checked ? 'bg-brand border-brand text-brand-on' : 'border-bg-border'}`}
                   >
                     {it.checked ? <Check size={16} strokeWidth={3} /> : null}
                   </button>
                   <div className="flex-1 min-w-0">
-                    <div className={`font-medium truncate ${it.checked ? 'line-through' : ''}`}>
+                    <div className={`font-medium ${shop ? '' : 'truncate'} ${it.checked ? 'line-through' : ''}`}>
                       {name}
                       {o && <span className={`ml-1.5 text-[10px] font-bold uppercase border rounded px-1 ${o.cls}`}>{o.label}</span>}
                     </div>
-                    <div className="text-xs text-text-muted">
+                    <div className={`text-xs text-text-muted ${shop ? 'hidden' : ''}`}>
                       {price != null ? `~${euro(price)}` : 'prezzo ?'}
                       {p ? ` · in casa ${fmtQty(data.stock[p.id] || 0)} ${p.default_unit}` : ''}
                       {p?.alternatives ? ` · ok anche: ${p.alternatives}` : ''}
                       {(it.origin === 'ricetta' || it.origin === 'planner') && it.note ? ` · per ${it.note}` : ''}
                     </div>
                   </div>
-                  <Stepper value={Number(it.qty || 1)} unit={it.unit || 'pz'} min={0} onChange={(v) => put('shopping_items', { id: it.id, qty: v })} />
-                  <IconButton label="Togli" onClick={async () => { await put('shopping_items', { id: it.id, deleted: 1 }, `Tolto ${name}`); showToast(`Tolto ${name}`, { label: 'Annulla', run: () => undo() }); }}>
+                  {shop ? (
+                    <span className="text-sm text-text-secondary tabular-nums shrink-0">{fmtQty(it.qty || 1)} {it.unit || 'pz'}</span>
+                  ) : (
+                    <Stepper value={Number(it.qty || 1)} unit={it.unit || 'pz'} min={0} onChange={(v) => put('shopping_items', { id: it.id, qty: v })} />
+                  )}
+                  <IconButton className={shop ? 'hidden' : ''} label="Togli" onClick={async () => { await put('shopping_items', { id: it.id, deleted: 1 }, `Tolto ${name}`); showToast(`Tolto ${name}`, { label: 'Annulla', run: () => undo() }); }}>
                     <Trash2 size={16} />
                   </IconButton>
                 </div>

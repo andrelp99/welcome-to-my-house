@@ -56,7 +56,7 @@ export async function pushStatus() {
   // iscritto nel browser ma non sul server (es. DB ripristinato): re-iscrivi in silenzio
   if (sub && !res.subscribed && Notification.permission === 'granted') {
     await apiFetch('/api/push/subscribe', { method: 'POST', body: JSON.stringify({ ...sub.toJSON(), device: deviceName() }) });
-    return { ...res, subscribed: true, prefs: { daily: true, weekly: true } };
+    return { ...res, subscribed: true, prefs: { daily: true, weekly: true, monthly: true } };
   }
   return { ...res, subscribed: !!sub && res.subscribed };
 }

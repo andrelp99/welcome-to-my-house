@@ -12,7 +12,7 @@ import RicettaForm from './pages/RicettaForm.jsx';
 import Cucina from './pages/Cucina.jsx';
 import RicettaImport from './pages/RicettaImport.jsx';
 import Planner from './pages/Planner.jsx';
-import { Placeholder } from './pages/Placeholder.jsx';
+import Finanze from './pages/Finanze.jsx';
 
 export default function App() {
   return (
@@ -31,7 +31,7 @@ export default function App() {
         <Route path="planner" element={<Planner />} />
         <Route path="ricette/:id" element={<RicettaDettaglio />} />
         <Route path="ricette/:id/modifica" element={<RicettaForm key="modifica" />} />
-        <Route path="finanze" element={<Placeholder title="Prospetto finanziario" fase="F5" testo="Storico prezzi, budget, proiezioni, sconti e analisi." />} />
+        <Route path="finanze" element={<Finanze />} />
         <Route path="impostazioni" element={<Impostazioni />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

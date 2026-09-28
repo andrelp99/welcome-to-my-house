@@ -78,7 +78,7 @@ data/                  file locali NON versionati (es. export ricette GZ)
 | `welcome-house-db` (binding `DB`) | Cloudflare D1 | write | Da F1: inserimenti e modifiche di tutti i dati dell'app, con `change_log` |
 | `welcome-house-db.push_subscriptions`, `server_kv` | Cloudflare D1 | write | Da F4: iscrizioni push; chiavi VAPID generate al primo uso |
 | Servizi push dei browser (FCM ecc.) | HTTP esterno | write | Da F4: notifiche cifrate (Web Push, VAPID) dal cron |
-| `welcome-house-db.files` | Cloudflare D1 | write | Da F2: foto compresse (max ~1,9 MB, `PUT /api/files/:id`), immutabili |
+| `welcome-house-db.files` | Cloudflare D1 | write | Da F5 anche cancellazione foto scontrino. Da F2: foto compresse (max ~1,9 MB, `PUT /api/files/:id`), immutabili |
 
 Foto in D1 (non R2): nessun bucket da creare, limite free 5 GB ampiamente sufficiente.
 
@@ -117,3 +117,16 @@ Foto in D1 (non R2): nessun bucket da creare, limite free 5 GB ampiamente suffic
 - **Cron** `*/30 * * * *` (`wrangler.jsonc` → `triggers`): decide in ora italiana (`worker/digest.ts`). 9:30 scadenze, solo se qualcosa entra oggi nella finestra di avviso o scade entro domani. Domenica 18:00 riepilogo: cosa scade, sotto scorta, spesa settimana vs budget, 3 ricette fattibili, pasti pianificati.
 - **Stagionalità** (`src/db/season.js`): frutta e verdura del mese, filtro "di stagione" nel ricettario e nel planner (almeno un ingrediente di stagione e nessuno fuori stagione; conserve escluse).
 - **Stima lista per supermercato**: ultimo prezzo pagato per catena, confrontato solo sui prodotti con prezzo noto in tutte.
+
+## Prospetto finanziario (F5)
+
+- Pagina `/finanze`, tutto calcolato in locale (`src/db/finance.js`) da `receipts`, `purchase_lines`, `extra_expenses`, `budgets`, `events`. Grafici leggeri senza librerie (`src/components/charts.jsx`), colori dai token del tema.
+- **Panoramica**: speso del mese vs mese prima, proiezione fine mese (dal 3° giorno), risparmio offerte, cibo buttato, budget cibo/casa con proiezione, ultimi 6 mesi, anno + proiezione, indicazioni automatiche.
+- **Budget**: un valore per area e mese; vale dal mese impostato in poi finché non lo cambi.
+- **Spese**: per settimana, calendario, per categoria, per supermercato, movimenti. Dettaglio scontrino con foto eliminabile (`DELETE /api/files/:id`). Spese extra manuali (area cibo/casa/altro).
+- **Prezzi**: storico per prodotto normalizzato (€/kg, €/l, €/pz), media, minimo, confronto tra catene; punti verdi = offerta.
+- **Affari**: risparmio, migliori offerte, "dove conviene" (≥3% tra catene), prodotti spesso in offerta.
+- **Sprechi**: da "Buttato" in Dispensa (evento `buttato` con valore dal prezzo della riga d'acquisto del lotto, altrimenti ultimo prezzo).
+- **Eventi di consumo**: il tasto − / conta rapida e "Finito" registrano `consumo` → previsione esaurimento (ritmo ultimi 60 giorni) in Home ("Finiscono presto") e in Dispensa.
+- **Report mensile push** il 1° alle 9:30 (cron esistente): speso vs budget, confronto col mese prima, risparmio, 3 affari, sprechi.
+- **Lista spesa**: modalità spesa (schermo acceso, righe grandi) e condivisione come testo.

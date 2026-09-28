@@ -107,3 +107,11 @@ export function usePhoto(id) {
   }, [id]);
   return url;
 }
+
+// Cancella una foto (es. scontrino dopo il check-in): locale + server.
+export async function deletePhoto(id) {
+  if (!id) return;
+  await db.files.delete(id);
+  const key = getHouseKey();
+  if (key) await fetch(`/api/files/${id}`, { method: 'DELETE', headers: { 'X-House-Key': key } }).catch(() => {});
+}

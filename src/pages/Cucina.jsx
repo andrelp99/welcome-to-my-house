@@ -5,35 +5,7 @@ import { useRecipes } from '../hooks/useData.js';
 import { Photo } from '../components/recipes.jsx';
 import { fmtAmount } from '../db/recipes.js';
 import { fmtQty } from '../db/logic.js';
-
-// Schermo sempre acceso finche' la pagina e' visibile.
-function useWakeLock() {
-  const [on, setOn] = useState(false);
-  useEffect(() => {
-    let lock = null;
-    let dead = false;
-    async function req() {
-      try {
-        if ('wakeLock' in navigator && document.visibilityState === 'visible') {
-          lock = await navigator.wakeLock.request('screen');
-          setOn(true);
-          lock.addEventListener('release', () => !dead && setOn(false));
-        }
-      } catch {
-        setOn(false);
-      }
-    }
-    req();
-    const onVis = () => document.visibilityState === 'visible' && req();
-    document.addEventListener('visibilitychange', onVis);
-    return () => {
-      dead = true;
-      document.removeEventListener('visibilitychange', onVis);
-      lock?.release().catch(() => {});
-    };
-  }, []);
-  return on;
-}
+import { useWakeLock } from '../hooks/useWakeLock.js';
 
 // Un solo timer (niente timer multipli, da piano). Continua tra un passaggio e l'altro.
 function useTimer() {

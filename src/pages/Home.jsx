@@ -1,8 +1,12 @@
 import { Link } from 'react-router';
 import { format } from 'date-fns';
 import { it } from 'date-fns/locale';
-import { AlarmClock, ShieldCheck, ShoppingCart, ChefHat, KeyRound, WifiOff, CalendarDays, Leaf } from 'lucide-react';
+import { AlarmClock, ShieldCheck, ShoppingCart, ChefHat, KeyRound, WifiOff, CalendarDays, Leaf, Hourglass } from 'lucide-react';
 import { SEASON, monthName } from '../db/season.js';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db } from '../db/db.js';
+import { depletion } from '../db/finance.js';
+import { put } from '../db/repo.js';
 import { Card } from '../components/ui/Card.jsx';
 import { ExpiryBadge, LEVEL_DOT } from '../components/ui/kit.jsx';
 import { useData, useSyncState, useRecipes } from '../hooks/useData.js';
@@ -12,6 +16,7 @@ import { lotStatus, LEVEL_ORDER, belowStock, fmtQty, minStock, euro } from '../d
 export default function Home() {
   const data = useData();
   const rec = useRecipes();
+  const consumi = useLiveQuery(() => db.events.where('type').equals('consumo').toArray(), []);
   const sync = useSyncState();
   const oggi = format(new Date(), 'EEEE d MMMM', { locale: it });
 
@@ -28,6 +33,8 @@ export default function Home() {
   const spesaEst = data ? data.shopping.reduce((s, x) => s + (data.lastPrice[x.product_id] ?? 0) * (x.qty || 1), 0) : 0;
   const expired = warn.filter((w) => w.st.level === 'expired').length;
   const month = new Date().getMonth() + 1;
+  const inListIds = new Set((data?.shopping || []).map((s) => s.product_id).filter(Boolean));
+  const ending = data && consumi ? depletion(consumi, data).filter((x) => x.days <= 7) : [];
   const todayISOstr = format(new Date(), 'yyyy-MM-dd');
   const todayPlan = rec ? rec.plan.filter((e) => e.date === todayISOstr) : [];
   // Ricette fattibili, prima quelle che usano cose in scadenza
@@ -134,6 +141,29 @@ export default function Home() {
           )}
           <Link to="/ricette" className="block mt-3 text-brand font-semibold text-sm">Ricettario →</Link>
         </Card>
+
+        {ending.length > 0 && (
+          <Card title={`Finiscono presto · ${ending.length}`} icon={Hourglass}>
+            <ul className="space-y-1.5 text-sm">
+              {ending.slice(0, 6).map((x) => (
+                <li key={x.p.id} className="flex items-center justify-between gap-2">
+                  <span className="truncate">{x.p.name}</span>
+                  <span className="flex items-center gap-2 shrink-0">
+                    <span className="text-text-muted text-xs">{x.days === 0 ? 'oggi' : `~${x.days} gg`}</span>
+                    {inListIds.has(x.p.id) ? (
+                      <span className="text-xs text-positive">in lista</span>
+                    ) : (
+                      <button type="button" className="text-xs text-brand font-semibold" onClick={() => put('shopping_items', { product_id: x.p.id, qty: 1, unit: x.p.default_unit, origin: 'scorta', checked: 0 }, `In lista: ${x.p.name}`)}>
+                        + lista
+                      </button>
+                    )}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs text-text-muted mt-2">Stima dal ritmo di consumo degli ultimi 60 giorni.</p>
+          </Card>
+        )}
 
         <Card title="Oggi in tavola" icon={CalendarDays}>
           {todayPlan.length === 0 ? (

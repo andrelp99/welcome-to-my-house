@@ -3,7 +3,7 @@ import { push, pull, type Change } from './sync';
 import { extract } from './ai';
 import { fetchPage, recipeFromHtml, htmlToText, fetchImageToFiles, MAX_FILE } from './importer';
 import { getVapid, sendPush, type PushMsg, type Sub } from './webpush';
-import { romeNow, dailyMessage, weeklyMessage } from './digest';
+import { romeNow, dailyMessage, weeklyMessage, monthlyMessage } from './digest';
 
 export type Env = {
   DB: D1Database;
@@ -76,6 +76,13 @@ app.get('/files/:id', async (c) => {
   });
 });
 
+app.delete('/files/:id', async (c) => {
+  const id = c.req.param('id');
+  if (!FILE_ID.test(id)) return c.json({ error: 'id non valido' }, 400);
+  await c.env.DB.prepare('DELETE FROM files WHERE id = ?').bind(id).run();
+  return c.json({ ok: true });
+});
+
 // Copia in D1 un'immagine remota (foto ricette importate). Ritorna la photo_key.
 app.post('/files/fetch', async (c) => {
   const body = await c.req.json<{ url?: string }>().catch(() => null);
@@ -145,7 +152,7 @@ async function subId(endpoint: string) {
   return [...new Uint8Array(d)].slice(0, 16).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 type SubRow = Sub & { prefs: string | null; fails: number };
-const prefsOf = (r: { prefs: string | null }) => ({ daily: true, weekly: true, ...(r.prefs ? JSON.parse(r.prefs) : {}) });
+const prefsOf = (r: { prefs: string | null }) => ({ daily: true, weekly: true, monthly: true, ...(r.prefs ? JSON.parse(r.prefs) : {}) });
 
 app.get('/push/key', async (c) => c.json({ publicKey: (await getVapid(c.env.DB)).publicKey }));
 
@@ -184,7 +191,7 @@ app.post('/push/prefs', async (c) => {
 
 // Prova su questo dispositivo, oppure anteprima di una notifica vera (daily/weekly) inviata subito.
 app.post('/push/test', async (c) => {
-  const b = await c.req.json<{ endpoint?: string; kind?: 'test' | 'daily' | 'weekly' }>().catch(() => null);
+  const b = await c.req.json<{ endpoint?: string; kind?: 'test' | 'daily' | 'weekly' | 'monthly' }>().catch(() => null);
   if (!b?.endpoint) return c.json({ error: 'endpoint mancante' }, 400);
   const sub = await c.env.DB.prepare('SELECT * FROM push_subscriptions WHERE id = ?').bind(await subId(b.endpoint)).first<SubRow>();
   if (!sub) return c.json({ error: 'Dispositivo non iscritto' }, 404);
@@ -194,13 +201,15 @@ app.post('/push/test', async (c) => {
       ? (await dailyMessage(c.env.DB, now.date)) ?? { title: 'Scadenze', body: 'Niente in scadenza oggi 👍', url: '/dispensa' }
       : b.kind === 'weekly'
         ? await weeklyMessage(c.env.DB, now.date, now.month)
-        : { title: 'Notifiche attive ✅', body: 'Welcome to My House ti avviserà qui.', url: '/' };
+        : b.kind === 'monthly'
+          ? await monthlyMessage(c.env.DB, now.month)
+          : { title: 'Notifiche attive ✅', body: 'Welcome to My House ti avviserà qui.', url: '/' };
   const r = await sendPush(c.env.DB, sub, msg);
   if (r === 'gone') await c.env.DB.prepare('DELETE FROM push_subscriptions WHERE id = ?').bind(sub.id).run();
   return r === true ? c.json({ ok: true, msg }) : c.json({ error: r === 'gone' ? 'Iscrizione scaduta: riattiva' : 'Invio non riuscito' }, 502);
 });
 
-async function broadcast(env: Env, kind: 'daily' | 'weekly', msg: PushMsg) {
+async function broadcast(env: Env, kind: 'daily' | 'weekly' | 'monthly', msg: PushMsg) {
   const subs = (await env.DB.prepare('SELECT * FROM push_subscriptions').all<SubRow>()).results.filter((s) => prefsOf(s)[kind] !== false);
   let sent = 0;
   for (const s of subs) {
@@ -220,12 +229,16 @@ async function once(env: Env, key: string, value: string) {
   return (r.meta.changes ?? 0) > 0;
 }
 
-// Cron ogni 30 minuti; decide in ora italiana: 9:30 scadenze, domenica 18:00 riepilogo.
+// Cron ogni 30 minuti; decide in ora italiana: 9:30 scadenze, 1° del mese 9:30 report, domenica 18:00 riepilogo.
 async function scheduled(_e: ScheduledController, env: Env) {
   const now = romeNow();
   if (now.hour === 9 && now.minute >= 30 && (await once(env, 'last_daily', now.date))) {
     const msg = await dailyMessage(env.DB, now.date);
     if (msg) console.log(JSON.stringify({ level: 'info', msg: 'push scadenze', sent: await broadcast(env, 'daily', msg) }));
+  }
+  if (now.day === 1 && now.hour === 9 && now.minute >= 30 && (await once(env, 'last_monthly', now.month))) {
+    const msg = await monthlyMessage(env.DB, now.month);
+    console.log(JSON.stringify({ level: 'info', msg: 'push report mensile', sent: await broadcast(env, 'monthly', msg) }));
   }
   if (now.weekday === 'Sun' && now.hour === 18 && now.minute < 30 && (await once(env, 'last_weekly', now.date))) {
     const msg = await weeklyMessage(env.DB, now.date, now.month);
