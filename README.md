@@ -3,11 +3,28 @@
 PWA personale per gestire casa, dispensa, lista della spesa, ricettario e prospetto finanziario.
 Gira interamente sul piano gratuito Cloudflare: un solo Worker serve sia l'app (static assets) sia le API.
 
-- Frontend: React 19 + Vite + Tailwind 3 + vite-plugin-pwa (installabile su Android)
-- API: Cloudflare Worker + Hono (TypeScript)
-- Database: Cloudflare D1 (SQLite), migrazioni in `migrations/`
+- Frontend: React 19 + react-router 7 + Vite 8 + Tailwind 3 + vite-plugin-pwa (installabile su Android, share target, push)
+- Dati locali: IndexedDB con Dexie 4, offline-first con sync verso il server
+- API: Cloudflare Worker + Hono (TypeScript), cron ogni 30 minuti per le notifiche
+- Database: Cloudflare D1 (SQLite), migrazioni in `migrations/`; foto nella tabella `files` (niente R2)
+- AI: Workers AI (modelli in `wrangler.jsonc` → `vars`)
+- Grafici: SVG/HTML fatti a mano, senza librerie
 - Tema: scuro di default, toggle chiaro, palette giallo + rosso (token RGB in `src/index.css`)
-- Config deploy: `wrangler.jsonc` è l'unica fonte di verità
+- Config deploy: `wrangler.jsonc` è l'unica fonte di verità (D1, AI, cron, assets)
+
+## Stato (28/09/2026)
+
+| Fase | Contenuto | Stato |
+|---|---|---|
+| F0 Setup | Repo, Worker, D1, chiave dispositivo, Workers Builds, PWA | Chiusa |
+| F1 MVP | Catalogo, Casa, Dispensa, Lista spesa, check-in, sync offline, annulla, backup | Chiusa |
+| F2 Ricettario | Ricette, stato ingredienti, sostituti, modalità cucina, "Ho cucinato", PDF | In produzione, verifica in corso |
+| F3 Import + AI | Link, share target, testo/foto, file GZ, scontrino AI | In produzione, verifica in corso |
+| F4 Smart | Planner, notifiche push, stagionalità, stima per supermercato | In produzione, verifica in corso |
+| F5 Finanze | Prospetto finanziario, sprechi, previsione esaurimento, report mensile | Scritta, da deployare |
+
+Limiti noti: annulla solo sul dispositivo dove si è fatta la modifica; foto non incluse nel backup JSON;
+ingredienti non riconosciuti dalle regole vanno collegati a mano.
 
 Piano completo di progetto: vedi il documento "Welcome to My House — Piano di progetto".
 
@@ -39,20 +56,34 @@ Per lavorare sul frontend con hot reload: `npm run dev:api` in un terminale e `n
 
 ## Deploy
 
+Flusso abituale (Workers Builds collegato a GitHub: ogni push su `main` fa il deploy):
+
 ```powershell
-npm run db:migrate:remote   # solo quando ci sono nuove migrazioni
-npm run deploy              # build + wrangler deploy
+npm run db:migrate:remote   # solo se ci sono nuove migrazioni in migrations/ (prima del push)
+git add -A
+git commit -m "..."
+git push
 ```
 
-Con Workers Builds collegato a GitHub, ogni push su `main` fa il deploy automatico.
+Deploy manuale, se serve: `npm run deploy` (build + wrangler deploy). Nessun secret oltre `HOUSE_KEY`:
+le chiavi push (VAPID) si generano da sole al primo uso e stanno in D1.
 
 ## Struttura
 
 ```
-worker/index.ts        API Hono (/api/health, /api/ping)
-migrations/            schema D1 versionato
-src/                   app React (pagine, componenti, hook tema, client API)
+worker/index.ts        API Hono: /api/sync, /api/files, /api/import, /api/ai, /api/push, /api/history + cron
+worker/sync.ts         push/pull con rev, vince l'updated_at più recente
+worker/ai.ts           interfaccia AI unica (ricetta, scontrino) con modello di riserva
+worker/importer.ts     import da link (JSON-LD schema.org) e copia foto remote in D1
+worker/webpush.ts      Web Push: VAPID ES256 + cifratura aes128gcm
+worker/digest.ts       contenuti notifiche: scadenze, riepilogo settimana, report mensile
+migrations/            schema D1: 0001_init, 0002_sync_seed, 0003_recipes, 0004_import, 0005_planner_push
+src/db/                Dexie, sync, logica dispensa, ricette, import, scontrino, planner, stagionalità, finanze, foto, push
+src/pages/             Home, Casa/Dispensa (Inventario), Spesa, Ricette (+ dettaglio, editor, import, cucina), Planner, Finanze, Catalogo, Impostazioni
+src/components/        ui/ (kit, layout, card), forms, recipes, charts
+src/hooks/             useData, useTheme, useWakeLock
 public/icons/          icona app (svg + png per PWA)
+public/push-sw.js      gestione notifiche nel service worker
 data/                  file locali NON versionati (es. export ricette GZ)
 ```
 
@@ -62,13 +93,12 @@ data/                  file locali NON versionati (es. export ricette GZ)
 
 | Risorsa | Tipo | Direzione | Note |
 |---|---|---|---|
-| `welcome-house-db` (binding `DB`) | Cloudflare D1 | read | Tutte le tabelle dell'app (luoghi, categorie, prodotti, lotti, lista spesa, scontrini, budget, ricette, sostituti, eventi) |
+| `welcome-house-db` (binding `DB`) | Cloudflare D1 | read | Tutte le tabelle dell'app (luoghi, categorie, prodotti, lotti, lista spesa, scontrini, righe, spese extra, budget, ricette, ingredienti, passaggi, sostituti, eventi, alias scontrino, planner) |
 | `welcome-house-db.files` | Cloudflare D1 | read | Foto ricette/passaggi (`GET /api/files/:id`) |
 | `HOUSE_KEY` | Worker secret | read | Verifica della chiave dispositivo |
 | `data/gz-il-mio-ricettario.json` | File locale | read | Export ricette GialloZafferano, caricato dall'app (Ricette → Importa → File); non versionato |
 | Workers AI (binding `AI`) | Cloudflare Workers AI | read | Da F3: ricette da testo/foto/pagine senza dati strutturati, lettura scontrini. Modelli in `wrangler.jsonc` → `vars` |
 | Pagine web e immagini ricette (es. `giallozafferano.it`) | HTTP esterno | read | Da F3: import da link (`POST /api/import/url`) e copia foto (`POST /api/files/fetch`) |
-
 | `welcome-house-db.push_subscriptions`, `server_kv` | Cloudflare D1 | read | Da F4: dispositivi iscritti alle notifiche, chiavi VAPID, ultimo invio |
 
 ### Output (scritture)
@@ -78,7 +108,7 @@ data/                  file locali NON versionati (es. export ricette GZ)
 | `welcome-house-db` (binding `DB`) | Cloudflare D1 | write | Da F1: inserimenti e modifiche di tutti i dati dell'app, con `change_log` |
 | `welcome-house-db.push_subscriptions`, `server_kv` | Cloudflare D1 | write | Da F4: iscrizioni push; chiavi VAPID generate al primo uso |
 | Servizi push dei browser (FCM ecc.) | HTTP esterno | write | Da F4: notifiche cifrate (Web Push, VAPID) dal cron |
-| `welcome-house-db.files` | Cloudflare D1 | write | Da F5 anche cancellazione foto scontrino. Da F2: foto compresse (max ~1,9 MB, `PUT /api/files/:id`), immutabili |
+| `welcome-house-db.files` | Cloudflare D1 | write | Da F2: foto compresse (max ~1,9 MB, `PUT /api/files/:id`), immutabili; da F3 foto copiate dai link; da F5 cancellazione foto scontrino (`DELETE /api/files/:id`) |
 
 Foto in D1 (non R2): nessun bucket da creare, limite free 5 GB ampiamente sufficiente.
 
@@ -87,8 +117,8 @@ Foto in D1 (non R2): nessun bucket da creare, limite free 5 GB ampiamente suffic
 - L'app legge/scrive sempre su IndexedDB (Dexie, `src/db/`). Ogni modifica va in `outbox` e parte verso `POST /api/sync`.
 - Il server assegna a ogni riga una `rev` crescente; i dispositivi scaricano tutto con `rev > cursore`.
 - Conflitti: vince l'`updated_at` più recente (per riga). Il server registra tutto in `change_log` (`GET /api/history`).
-- Annulla: cronologia locale per dispositivo (Impostazioni → Cronologia).
-- Backup: Impostazioni → Esporta JSON / Ripristina.
+- Annulla: cronologia locale per dispositivo, 300 voci (Impostazioni → Cronologia). Annulla tra dispositivi: non ancora fatto.
+- Backup: Impostazioni → Esporta JSON / Ripristina (tutte le tabelle sincronizzate; foto escluse).
 
 ## Ricettario (F2)
 
