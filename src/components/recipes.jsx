@@ -1,5 +1,8 @@
 import { useRef, useState } from 'react';
-import { ChefHat, Camera, ImagePlus, X, Check, AlertTriangle, XCircle, HelpCircle, Repeat, Trash2, Plus, MinusCircle, Ban, EyeOff, Eye } from 'lucide-react';
+import { ChefHat, Camera, ImagePlus, X, Check, AlertTriangle, XCircle, HelpCircle, Repeat, Trash2, Plus, MinusCircle, Ban, EyeOff, Eye, Star } from 'lucide-react';
+import { cookedDiaryOps, mealFromClock, getSetting } from '../db/meals.js';
+import { MEALS_ALL, FREQ_LABEL } from '../db/variety.js';
+import { todayISO } from '../db/logic.js';
 import { usePhoto, addPhoto } from '../db/photos.js';
 import { Modal, Field, Input, Select, Button, IconButton, Stepper, ProductPicker, Empty } from './ui/kit.jsx';
 import { fmtAmount, cookRecipe, proposedUses } from '../db/recipes.js';
@@ -120,7 +123,31 @@ export function IngredientList({ rows, scale, onLink, onOptional }) {
 }
 
 // Conferma "Ho cucinato": quantita' da scalare modificabili + avanzi.
-export function CookedModal({ recipe, status, servings, data, onClose }) {
+// Stelle 1-5 (gradimento) o frequenza 🔁 1-5 + "mai".
+export function Stars({ value, onChange, kind = 'star', size = 22, label }) {
+  const Icon = kind === 'star' ? Star : Repeat;
+  return (
+    <div className="inline-flex items-center gap-0.5" role="group" aria-label={label}>
+      {[1, 2, 3, 4, 5].map((n) => (
+        <button key={n} type="button" className="p-0.5" aria-label={`${label} ${n}`} aria-pressed={value >= n} onClick={() => onChange(value === n ? null : n)}>
+          <Icon size={size} className={value >= n ? (kind === 'star' ? 'fill-brand text-brand' : 'text-brand') : 'text-text-muted opacity-50'} />
+        </button>
+      ))}
+      {kind === 'freq' && (
+        <button type="button" onClick={() => onChange(value === 0 ? null : 0)} aria-pressed={value === 0} className={`ml-1 rounded-full border px-2 py-0.5 text-xs ${value === 0 ? 'bg-negative/20 border-negative text-negative' : 'border-bg-border text-text-muted'}`}>
+          mai
+        </button>
+      )}
+    </div>
+  );
+}
+export const freqText = (v) => FREQ_LABEL[v == null ? 3 : v];
+
+export function CookedModal({ recipe, status, servings, data, rec, planId, urgent = 0, onClose }) {
+  const extra = !!getSetting(rec, 'planner', {})?.extraMeals;
+  const planned = planId && rec?.plan.find((e) => e.id === planId);
+  const [meal, setMeal] = useState(planned?.meal || mealFromClock(extra));
+  const [rating, setRating] = useState(recipe.rating || null);
   const [uses, setUses] = useState(() => proposedUses(status).map((u) => ({ ...u, on: u.qty > 0 })));
   const [left, setLeft] = useState(0);
   const [leftLoc, setLeftLoc] = useState('loc-frigo');
@@ -133,8 +160,9 @@ export function CookedModal({ recipe, status, servings, data, onClose }) {
       uses: uses.filter((u) => u.on && u.qty > 0),
       leftovers: left > 0 ? { portions: left, location_id: leftLoc } : null,
       data,
+      extraOps: rec ? cookedDiaryOps({ rec, recipe, date: todayISO(), meal, servings, planId, usedExpiring: urgent, rating: rating && rating !== recipe.rating ? rating : null }) : [],
     });
-    showToast(`Buon appetito! Dispensa aggiornata`, { label: 'Annulla', run: () => undo() });
+    showToast(`Buon appetito! Dispensa e diario aggiornati`, { label: 'Annulla', run: () => undo() });
     onClose(true);
   }
   return (
@@ -148,8 +176,18 @@ export function CookedModal({ recipe, status, servings, data, onClose }) {
         </>
       }
     >
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Pasto di oggi">
+          <Select value={meal} onChange={(e) => setMeal(e.target.value)}>
+            {MEALS_ALL.filter((m) => extra || !m.extra || m.id === meal).map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </Select>
+        </Field>
+        <Field label="Com'era?">
+          <Stars value={rating} onChange={setRating} label="Gradimento" />
+        </Field>
+      </div>
       <p className="text-sm text-text-secondary">
-        {recipe.title} · {fmtQty(servings)} porzioni. Tolgo dalla dispensa (prima i lotti che scadono prima):
+        {recipe.title} · {fmtQty(servings)} porzioni. Va nel diario del planner. Tolgo dalla dispensa (prima i lotti che scadono prima):
       </p>
       {uses.length === 0 ? (
         <Empty>Nessun ingrediente collegato al catalogo.</Empty>

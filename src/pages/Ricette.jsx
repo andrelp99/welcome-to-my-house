@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import { Plus, Search, Clock, Star, BookOpen, Download, Leaf, CalendarDays, Link2, ChevronRight, Sparkles } from 'lucide-react';
 import { recipeSeason, monthName } from '../db/season.js';
 import { useData, useRecipes } from '../hooks/useData.js';
@@ -10,6 +10,8 @@ import { countUnlinked } from '../db/linker.js';
 import { autoTags, cleanTags, TIMES, COURSE_MAIN, BASES, DIFF_LABEL, FEATURE_GROUPS, COMPUTED_FEATURES, FEATURE_LABEL, featuresOf, foodLabel } from '../db/tags.js';
 import { expiringSet, urgentOf, recipeCost, nutritionOf } from '../db/insights.js';
 import { euro } from '../db/logic.js';
+import { rankRecipes, recipeAsDish } from '../db/meals.js';
+import { GOAL_BY_ID } from '../db/variety.js';
 
 export default function Ricette() {
   const data = useData();
@@ -22,7 +24,9 @@ export default function Ricette() {
   const [fCourse, setFCourse] = useState('');
   const [fTime, setFTime] = useState('');
   const [fDiff, setFDiff] = useState('');
-  const [sort, setSort] = useState('scade');
+  const [sort, setSort] = useState('consigliate');
+  const [params, setParams] = useSearchParams();
+  const goal = GOAL_BY_ID[params.get('obiettivo')];
   const [fTags, setFTags] = useState([]);
   const [fBase, setFBase] = useState('');
   const [fFeat, setFFeat] = useState([]);
@@ -32,6 +36,7 @@ export default function Ricette() {
   const rows = useMemo(() => {
     if (!data || !rec) return [];
     const exp = expiringSet(data);
+    const ranked = Object.fromEntries(rankRecipes(rec, data).map((x) => [x.r.id, x]));
     return rec.list.map((r) => {
       const ings = rec.ings[r.id] || [];
       const scale = 1 / (r.servings || 1);
@@ -45,6 +50,7 @@ export default function Ricette() {
         urgent: urgentOf(ings, exp, data),
         cost: recipeCost(ings, scale, data),
         kcal: nutritionOf(r)?.kcal ?? null,
+        rank: ranked[r.id],
       };
     }).map((x) => ({ ...x, feats: featuresOf(x.r, { kcal: x.kcal, cost: x.cost }) }));
   }, [data, rec, month]);
@@ -54,6 +60,7 @@ export default function Ricette() {
   const baseMatch = (auto) => [auto.main, auto.second].some((f) => f && (fBase.includes('|') ? f.value === fBase : f.group === fBase));
   const list = rows.filter(({ r, st, diet: d, tags, season: inSeason, auto, feats }) => {
     if (season && !inSeason) return false;
+    if (goal?.match && !goal.match(recipeAsDish(r))) return false;
     if (fCourse && auto.courseGroup !== fCourse) return false;
     if (fBase && !baseMatch(auto)) return false;
     if (fTime && auto.time !== fTime) return false;
@@ -70,6 +77,7 @@ export default function Ricette() {
     return true;
   });
   const SORTS = {
+    consigliate: (a, b) => (b.rank?.total ?? -1) - (a.rank?.total ?? -1) || a.r.title.localeCompare(b.r.title, 'it'),
     scade: (a, b) => b.urgent.length - a.urgent.length || b.st.feasible - a.st.feasible || a.r.title.localeCompare(b.r.title, 'it'),
     // prima le ricette con tutti i prezzi noti, poi quelle parziali (il costo e' un minimo)
     costo: (a, b) => (a.cost.known ? (a.cost.unknown.length ? 1 : 0) : 2) - (b.cost.known ? (b.cost.unknown.length ? 1 : 0) : 2) || a.cost.total - b.cost.total || a.r.title.localeCompare(b.r.title, 'it'),
@@ -128,6 +136,13 @@ export default function Ricette() {
         </Link>
       )}
 
+      {goal && tab !== 'subs' && (
+        <div className="flex items-center justify-between gap-2 rounded-lg border border-warning/50 bg-warning/10 px-4 py-2 text-sm">
+          <span>Obiettivo della settimana: <b>{goal.label}</b></span>
+          <button type="button" className="text-brand font-semibold" onClick={() => setParams({})}>Tutte</button>
+        </div>
+      )}
+
       {tab === 'subs' ? (
         <SubstitutionsPanel data={data} rec={rec} />
       ) : (
@@ -143,6 +158,7 @@ export default function Ricette() {
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
             <Select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Ordina">
+              <option value="consigliate">Consigliate</option>
               <option value="scade">Prima ciò che scade</option>
               <option value="costo">Più economiche</option>
               <option value="kcal">Meno calorie</option>
@@ -233,7 +249,7 @@ export default function Ricette() {
             <Empty icon={BookOpen}>{rows.length === 0 ? 'Nessuna ricetta. Crea con + o importa (link, testo, foto, file GZ).' : 'Nessuna ricetta con questi filtri.'}</Empty>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {list.map(({ r, st, diet: d, season: inSeason, auto, urgent, cost, kcal, feats }) => {
+              {list.map(({ r, st, diet: d, season: inSeason, auto, urgent, cost, kcal, feats, rank }) => {
                 return (
                   <Link key={r.id} to={`/ricette/${r.id}`} className="flex sm:flex-col gap-3 sm:gap-0 rounded-lg border border-bg-border bg-bg-surface shadow-card overflow-hidden hover:border-brand transition-colors">
                     <Photo id={r.photo_key} className="w-24 h-24 sm:w-full sm:h-36 shrink-0" />
@@ -241,7 +257,13 @@ export default function Ricette() {
                       <div className="font-semibold leading-snug line-clamp-2">
                         {r.favorite ? <Star size={14} className="inline -mt-1 mr-1 fill-brand text-brand" /> : null}
                         {r.title}
+                        {r.rating ? <span className="ml-1.5 text-xs text-brand font-normal">★{r.rating}</span> : null}
                       </div>
+                      {sort === 'consigliate' && rank && (
+                        <div className="text-[11px] text-text-muted line-clamp-1">
+                          {rank.total >= 0 ? <><b className="text-brand">{rank.total}</b> · {rank.reasons.slice(0, 3).join(' · ')}</> : <span>esclusa: {rank.excluded}</span>}
+                        </div>
+                      )}
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
                         {auto.course && <span className="font-semibold text-text-secondary">{auto.course.value}</span>}
                         {auto.main && <span className="text-text-secondary">{foodLabel(auto.main.value)}</span>}

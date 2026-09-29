@@ -1,17 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { addDays, isSameDay } from 'date-fns';
-import { ChevronLeft, ChevronRight, Plus, ShoppingCart, Trash2, Check, StickyNote, Search, Leaf, ChefHat } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, ShoppingCart, Trash2, Check, PenLine, ChefHat, Sparkles, MapPin, BarChart3 } from 'lucide-react';
 import { useData, useRecipes, showToast } from '../hooks/useData.js';
-import { Button, IconButton, Modal, Stepper, Tabs, Input, Empty } from '../components/ui/kit.jsx';
+import { Button, IconButton, Modal, Field, Toggle, Select, Empty } from '../components/ui/kit.jsx';
+import { AddDishModal, MealModal, VarietyDashboard, Analyses } from '../components/diary.jsx';
+import { MEALS_ALL, PLACES, mealId } from '../db/variety.js';
+import { getSetting, saveSetting, proposeFor, saveProposals, removeProposals } from '../db/meals.js';
+import { foodLabel } from '../db/tags.js';
 import { Photo } from '../components/recipes.jsx';
 import { StatusChip } from './Ricette.jsx';
-import { MEALS, iso, weekStart, weekDays, planNeeds, addNeedsToList, dayLabel } from '../db/planner.js';
+import { iso, weekStart, weekDays, planNeeds, addNeedsToList, dayLabel } from '../db/planner.js';
 import { recipeStatus } from '../db/recipes.js';
-import { recipeSeason } from '../db/season.js';
-import { fmtQty } from '../db/logic.js';
+import { euro } from '../db/logic.js';
 import { put, remove, undo } from '../db/repo.js';
-import { expiringSet, urgentOf } from '../db/insights.js';
 import { fmtAmount } from '../db/recipes.js';
 
 export default function Planner() {
@@ -19,8 +21,11 @@ export default function Planner() {
   const rec = useRecipes();
   const nav = useNavigate();
   const [start, setStart] = useState(() => weekStart());
-  const [adding, setAdding] = useState(null); // { date, meal }
+  const [adding, setAdding] = useState(null); // { date, meal, done }
+  const [mealEdit, setMealEdit] = useState(null); // { date, meal }
+  const [fill, setFill] = useState(false);
   const [review, setReview] = useState(null);
+  const [showAn, setShowAn] = useState(false);
   const todayRef = useRef(null);
   const scrolled = useRef(false);
   useEffect(() => {
@@ -41,12 +46,14 @@ export default function Planner() {
     const out = {};
     for (const e of entries) {
       const r = e.recipe_id && rec.byId[e.recipe_id];
-      if (r) out[e.id] = recipeStatus(rec.ings[r.id] || [], (Number(e.servings) || 1) / (r.servings || 1), data, rec.subs);
+      if (r && !e.done) out[e.id] = recipeStatus(rec.ings[r.id] || [], (Number(e.servings) || 1) / (r.servings || 1), data, rec.subs);
     }
     return out;
   }, [entries, data, rec]);
 
   if (!data || !rec) return null;
+  const extra = !!getSetting(rec, 'planner', {})?.extraMeals;
+  const meals = MEALS_ALL.filter((m) => extra || !m.extra);
   const upcoming = entries.filter((e) => e.date >= today && !e.done);
 
   function openList() {
@@ -60,11 +67,16 @@ export default function Planner() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold">Planner</h1>
-          <p className="text-text-secondary text-sm">Pasti della settimana → lista con solo ciò che manca.</p>
+          <p className="text-text-secondary text-sm">Pasti in programma e diario di cosa hai mangiato.</p>
         </div>
-        <Button aria-label="Genera lista" onClick={openList} disabled={!upcoming.length}>
-          <ShoppingCart size={18} /> <span className="hidden sm:inline">Genera lista</span>
-        </Button>
+        <div className="flex gap-2 shrink-0">
+          <Button variant="ghost" aria-label="Riempi con proposte" onClick={() => setFill(true)}>
+            <Sparkles size={18} /> <span className="hidden sm:inline">Riempi</span>
+          </Button>
+          <Button aria-label="Genera lista" onClick={openList} disabled={!upcoming.length}>
+            <ShoppingCart size={18} /> <span className="hidden sm:inline">Lista</span>
+          </Button>
+        </div>
       </div>
 
       <div className="flex items-center justify-between gap-2 rounded-lg border border-bg-border bg-bg-surface px-2 py-1.5">
@@ -80,48 +92,74 @@ export default function Planner() {
         </IconButton>
       </div>
 
+      <VarietyDashboard rec={rec} data={data} weekFrom={from} onGoal={(g) => nav(`/ricette?obiettivo=${g.id}`)} />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <button type="button" className="text-sm font-semibold text-brand" onClick={() => setShowAn((v) => !v)}>
+          <BarChart3 size={16} className="inline -mt-0.5 mr-1" /> Analisi {showAn ? '▴' : '▾'}
+        </button>
+        <Toggle checked={extra} onChange={(v) => saveSetting('planner', { ...(getSetting(rec, 'planner', {}) || {}), extraMeals: v }, v ? 'Colazione e merenda: sì' : 'Colazione e merenda: no')} label="Colazione e merenda" />
+      </div>
+      {showAn && <Analyses rec={rec} data={data} />}
+
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {days.map((d) => {
           const di = iso(d);
           const isToday = isSameDay(d, new Date());
           const past = di < today;
           return (
-            <section key={di} ref={isToday ? todayRef : null} className={`min-w-0 rounded-lg border bg-bg-surface p-3 space-y-2 ${isToday ? 'border-brand' : 'border-bg-border'} ${past ? 'opacity-70' : ''}`}>
+            <section key={di} ref={isToday ? todayRef : null} className={`min-w-0 rounded-lg border bg-bg-surface p-3 space-y-2 ${isToday ? 'border-brand' : 'border-bg-border'}`}>
               <h2 className="font-bold capitalize flex items-center gap-2">
                 {dayLabel(d, { weekday: 'long', day: 'numeric' })}
                 {isToday && <span className="rounded-full bg-brand text-brand-on px-2 py-0.5 text-[10px] uppercase">oggi</span>}
               </h2>
-              {MEALS.map((m) => {
+              {meals.map((m) => {
                 const list = entries.filter((e) => e.date === di && e.meal === m.id);
+                const ml = rec.meals[mealId(di, m.id)];
+                const place = ml?.place && list.length && ml.place !== 'casa' ? ml.place : null;
                 return (
                   <div key={m.id}>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs uppercase tracking-wider font-semibold text-text-muted">{m.label}</span>
-                      <IconButton label={`Aggiungi ${m.label.toLowerCase()} ${dayLabel(d)}`} onClick={() => setAdding({ date: di, meal: m.id })}>
-                        <Plus size={16} />
-                      </IconButton>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs uppercase tracking-wider font-semibold text-text-muted flex items-center gap-2 min-w-0">
+                        {m.label}
+                        {place && (
+                          <button type="button" onClick={() => setMealEdit({ date: di, meal: m.id })} className={`normal-case tracking-normal rounded-full border px-2 py-0.5 text-[11px] ${place === 'casa' ? 'border-bg-border text-text-muted' : 'border-warning/60 text-warning'}`}>
+                            <MapPin size={11} className="inline -mt-0.5" /> {PLACES.find((p) => p.id === place)?.label}{ml?.cost ? ` · ${euro(ml.cost)}` : ''}
+                          </button>
+                        )}
+                      </span>
+                      <span className="flex gap-1.5 shrink-0">
+                        {list.length > 0 && !place && (
+                          <IconButton label={`Luogo ${m.label.toLowerCase()} ${dayLabel(d)}`} onClick={() => setMealEdit({ date: di, meal: m.id })}>
+                            <MapPin size={15} />
+                          </IconButton>
+                        )}
+                        <IconButton label={`Aggiungi ${m.label.toLowerCase()} ${dayLabel(d)}`} onClick={() => setAdding({ date: di, meal: m.id, done: di <= today })}>
+                          <Plus size={16} />
+                        </IconButton>
+                      </span>
                     </div>
                     {list.map((e) => {
-                      const r = e.recipe_id && rec.byId[e.recipe_id];
+                      const r = (e.recipe_id && rec.byId[e.recipe_id]) || (e.leftover_of && rec.byId[e.leftover_of]);
+                      const title = r ? `${e.leftover_of ? 'Avanzo: ' : ''}${r.title}` : e.note || 'Piatto';
                       return (
                         <div key={e.id} className="flex items-center gap-2 py-1">
-                          {r ? <Photo id={r.photo_key} className="w-10 h-10 rounded-md shrink-0" /> : <StickyNote size={18} className="text-text-muted shrink-0 mx-2.5" />}
+                          {r ? <Photo id={r.photo_key} className="w-10 h-10 rounded-md shrink-0" /> : <PenLine size={18} className="text-text-muted shrink-0 mx-2.5" />}
                           <div className="flex-1 min-w-0">
-                            {r ? (
-                              <Link to={`/ricette/${r.id}?porzioni=${e.servings}&piano=${e.id}`} className={`block truncate font-medium ${e.done ? 'line-through text-text-muted' : ''}`}>
-                                {r.title}
+                            {e.recipe_id && r ? (
+                              <Link to={`/ricette/${r.id}?porzioni=${e.servings}&piano=${e.id}`} className={`block truncate font-medium ${e.done ? '' : past ? 'text-text-muted' : ''}`}>
+                                {title}
                               </Link>
                             ) : (
-                              <span className={`block truncate ${e.done ? 'line-through text-text-muted' : ''}`}>{e.note || 'Nota'}</span>
+                              <span className="block truncate">{title}</span>
                             )}
-                            {r && (
-                              <div className="flex items-center gap-2 text-xs text-text-muted">
-                                {fmtQty(e.servings)} porz.
-                                {!e.done && status[e.id] && <StatusChip st={status[e.id]} />}
-                              </div>
-                            )}
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-text-muted">
+                              {e.done ? <span className="text-positive">mangiato</span> : past ? <span>non segnato</span> : null}
+                              {e.auto && !e.done ? <span className="text-brand">proposta</span> : null}
+                              {!e.recipe_id && !e.leftover_of && e.dish_main ? <span>{foodLabel(e.dish_main)}</span> : null}
+                              {!e.done && status[e.id] && <StatusChip st={status[e.id]} />}
+                            </div>
                           </div>
-                          <IconButton label={e.done ? 'Da fare' : 'Fatto'} onClick={() => put('meal_plan', { id: e.id, done: e.done ? 0 : 1 })}>
+                          <IconButton label={e.done ? 'Non mangiato' : 'Mangiato'} onClick={() => put('meal_plan', { id: e.id, done: e.done ? 0 : 1, done_at: e.done ? null : today })}>
                             <Check size={16} className={e.done ? 'text-positive' : ''} />
                           </IconButton>
                           <IconButton
@@ -144,108 +182,116 @@ export default function Planner() {
         })}
       </div>
 
-      {adding && <AddMeal slot={adding} data={data} rec={rec} onClose={() => setAdding(null)} />}
+      {adding && <AddDishModal rec={rec} data={data} date={adding.date} meal={adding.meal} done={adding.done} onClose={() => setAdding(null)} />}
+      {mealEdit && <MealModal rec={rec} date={mealEdit.date} meal={mealEdit.meal} onClose={() => setMealEdit(null)} />}
+      {fill && <FillModal rec={rec} data={data} days={days.map(iso)} meals={meals} onClose={() => setFill(false)} />}
       {review && <NeedsReview needs={review} data={data} onClose={() => setReview(null)} onDone={() => nav('/spesa')} />}
     </div>
   );
 }
 
-function AddMeal({ slot, data, rec, onClose }) {
-  const [tab, setTab] = useState('ok');
-  const [q, setQ] = useState('');
-  const [pick, setPick] = useState(null);
-  const [servings, setServings] = useState(1);
-  const [note, setNote] = useState('');
-  const month = Number(slot.date.slice(5, 7));
-  const exp = useMemo(() => expiringSet(data), [data]);
-  const rows = useMemo(
-    () =>
-      rec.list.map((r) => ({
-        r,
-        st: recipeStatus(rec.ings[r.id] || [], 1 / (r.servings || 1), data, rec.subs),
-        season: recipeSeason(rec.ings[r.id] || [], month).seasonal,
-        urgent: urgentOf(rec.ings[r.id] || [], exp, data).length,
-      })),
-    [rec, data, month, exp]
-  );
-  const s = q.trim().toLowerCase();
-  const list = rows
-    .filter(({ r, st, season }) => (tab === 'ok' ? st.feasible : tab === 'season' ? season : tab === 'fav' ? r.favorite : true))
-    .filter(({ r }) => !s || r.title.toLowerCase().includes(s))
-    .sort((a, b) => b.urgent - a.urgent || (a.r.last_cooked_at || '').localeCompare(b.r.last_cooked_at || ''));
+// Riempi con proposte: giorni e pasti scelti, varieta' rispettata anche tra le proposte.
+function FillModal({ rec, data, days, meals, onClose }) {
+  const today = iso(new Date());
+  const [selDays, setSelDays] = useState(() => new Set(days.filter((d) => d >= today)));
+  const [selMeals, setSelMeals] = useState(() => new Set(['pranzo', 'cena']));
+  const [onlyEmpty, setOnlyEmpty] = useState(true);
+  const [props, setProps] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const toggle = (set, setter, v) => {
+    const n = new Set(set);
+    n.has(v) ? n.delete(v) : n.add(v);
+    setter(n);
+  };
+  const slots = days
+    .filter((d) => selDays.has(d))
+    .flatMap((d) => meals.filter((m) => selMeals.has(m.id)).map((m) => ({ date: d, meal: m.id })))
+    .filter((s) => !onlyEmpty || !rec.plan.some((e) => e.date === s.date && e.meal === s.meal));
+  const autoCount = rec.plan.filter((e) => e.auto && !e.done && selDays.has(e.date)).length;
 
-  async function add(recipe) {
-    await put('meal_plan', { date: slot.date, meal: slot.meal, recipe_id: recipe?.id || null, servings: recipe ? servings : 1, note: recipe ? null : note.trim(), done: 0 }, `Planner: ${recipe?.title || note}`);
+  function generate() {
+    setBusy(true);
+    setTimeout(() => {
+      setProps(proposeFor(rec, data, slots));
+      setBusy(false);
+    }, 10);
+  }
+  async function confirm() {
+    await saveProposals(rec, props);
+    showToast(`${props.length} proposte nel planner`, { label: 'Annulla', run: () => undo() });
     onClose();
+  }
+  async function clearAuto() {
+    const n = await removeProposals(rec, [...selDays]);
+    showToast(n ? `Tolte ${n} proposte` : 'Nessuna proposta da togliere', n ? { label: 'Annulla', run: () => undo() } : undefined);
   }
 
   return (
-    <Modal title={`${slot.meal === 'pranzo' ? 'Pranzo' : 'Cena'} · ${dayLabel(slot.date, { weekday: 'long', day: 'numeric' })}`} onClose={onClose}>
-      {pick ? (
+    <Modal
+      title="Riempi con proposte"
+      onClose={onClose}
+      footer={
+        props ? (
+          <>
+            <Button variant="ghost" className="mr-auto" onClick={() => setProps(null)}>Indietro</Button>
+            <Button disabled={!props.length} onClick={confirm}>Aggiungi {props.length}</Button>
+          </>
+        ) : (
+          <>
+            <Button variant="ghost" className="mr-auto" disabled={!autoCount} onClick={clearAuto}>Togli proposte ({autoCount})</Button>
+            <Button disabled={!slots.length || busy} onClick={generate}>{busy ? 'Calcolo…' : `Proponi (${slots.length})`}</Button>
+          </>
+        )
+      }
+    >
+      {!props ? (
         <div className="space-y-4">
-          <div className="flex items-center gap-3">
-            <Photo id={pick.photo_key} className="w-16 h-16 rounded-md" />
-            <div className="font-semibold">{pick.title}</div>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-semibold">Porzioni</span>
-            <Stepper value={servings} unit="porz." min={1} onChange={(v) => setServings(Math.max(1, v))} />
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setPick(null)}>Indietro</Button>
-            <Button onClick={() => add(pick)}>Aggiungi</Button>
-          </div>
-        </div>
-      ) : (
-        <>
-          <Tabs
-            value={tab}
-            onChange={setTab}
-            tabs={[
-              { value: 'ok', label: 'Fattibili' },
-              { value: 'season', label: 'Di stagione' },
-              { value: 'fav', label: '★' },
-              { value: 'all', label: 'Tutte' },
-              { value: 'note', label: 'Nota' },
-            ]}
-          />
-          {tab === 'note' ? (
-            <div className="space-y-3">
-              <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Es. fuori a cena, pizza, avanzi" autoFocus />
-              <div className="flex justify-end">
-                <Button disabled={!note.trim()} onClick={() => add(null)}>Aggiungi</Button>
-              </div>
+          <Field label="Giorni">
+            <div className="flex flex-wrap gap-1.5">
+              {days.map((d) => (
+                <button key={d} type="button" onClick={() => toggle(selDays, setSelDays, d)} className={`rounded-full border px-3 py-1 text-sm capitalize ${selDays.has(d) ? 'bg-brand text-brand-on border-brand' : 'border-bg-border bg-bg-elevated'}`}>
+                  {dayLabel(d, { weekday: 'short', day: 'numeric' })}
+                </button>
+              ))}
             </div>
-          ) : (
-            <>
-              <div className="relative">
-                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
-                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cerca ricetta…" className="w-full rounded-md bg-bg-elevated border border-bg-border pl-9 pr-3 py-2.5 placeholder:text-text-muted focus:outline-none focus:border-brand" />
+          </Field>
+          <Field label="Pasti">
+            <div className="flex flex-wrap gap-1.5">
+              {meals.map((m) => (
+                <button key={m.id} type="button" onClick={() => toggle(selMeals, setSelMeals, m.id)} className={`rounded-full border px-3 py-1 text-sm ${selMeals.has(m.id) ? 'bg-brand text-brand-on border-brand' : 'border-bg-border bg-bg-elevated'}`}>
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          </Field>
+          <Toggle checked={onlyEmpty} onChange={setOnlyEmpty} label="Solo pasti ancora vuoti" />
+          <p className="text-xs text-text-muted">Le proposte seguono l'ordinamento Consigliate (varietà, gradimento, ritardo, scadenze, fattibile) e non si ripetono tra loro. “Togli proposte” elimina quelle non ancora mangiate nei giorni scelti.</p>
+        </div>
+      ) : props.length === 0 ? (
+        <Empty icon={ChefHat}>Nessuna proposta: controlla le ricette escluse (“non propormela”) o le frequenze.</Empty>
+      ) : (
+        <ul className="divide-y divide-bg-border">
+          {props.map((p, i) => (
+            <li key={`${p.date}-${p.meal}`} className="py-2 space-y-1">
+              <div className="flex items-center justify-between gap-2 text-xs text-text-muted">
+                <span className="capitalize">{dayLabel(p.date, { weekday: 'short', day: 'numeric' })} · {p.meal}</span>
+                <IconButton label="Togli questa proposta" className="w-8 h-8" onClick={() => setProps((x) => x.filter((_, j) => j !== i))}><Trash2 size={14} /></IconButton>
               </div>
-              {list.length === 0 ? (
-                <Empty icon={tab === 'season' ? Leaf : ChefHat}>{tab === 'ok' ? 'Nessuna ricetta fattibile ora: prova “Tutte”.' : 'Nessuna ricetta.'}</Empty>
-              ) : (
-                <ul className="divide-y divide-bg-border max-h-[50vh] overflow-y-auto">
-                  {list.map(({ r, st, season, urgent }) => (
-                    <li key={r.id}>
-                      <button type="button" className="w-full flex items-center gap-3 py-2 text-left" onClick={() => { setPick(r); setServings(1); }}>
-                        <Photo id={r.photo_key} className="w-12 h-12 rounded-md shrink-0" />
-                        <span className="flex-1 min-w-0">
-                          <span className="block truncate font-medium">{r.title}</span>
-                          <span className="flex items-center gap-2">
-                            <StatusChip st={st} />
-                            {season && <Leaf size={14} className="text-positive" aria-label="di stagione" />}
-                            {urgent > 0 && <span className="text-warning text-xs">usa {urgent} in scadenza</span>}
-                          </span>
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </>
-          )}
-        </>
+              <Select
+                value={p.r.id}
+                aria-label="Cambia ricetta"
+                onChange={(e) => {
+                  const alt = p.alternatives.find((x) => x.r.id === e.target.value);
+                  if (alt) setProps((x) => x.map((y, j) => (j === i ? { ...y, r: alt.r, total: alt.total, reasons: alt.reasons, alternatives: [{ r: p.r, total: p.total, reasons: p.reasons }, ...p.alternatives.filter((a) => a.r.id !== alt.r.id)] } : y)));
+                }}
+              >
+                <option value={p.r.id}>{p.r.title} · {p.total}</option>
+                {p.alternatives.map((x) => <option key={x.r.id} value={x.r.id}>{x.r.title} · {x.total}</option>)}
+              </Select>
+              <div className="text-[11px] text-text-muted truncate">{p.reasons.slice(0, 3).join(' · ')}</div>
+            </li>
+          ))}
+        </ul>
       )}
     </Modal>
   );

@@ -355,7 +355,7 @@ async function once(env: Env, key: string, value: string) {
   return (r.meta.changes ?? 0) > 0;
 }
 
-// Cron ogni 30 minuti; decide in ora italiana: 9:30 scadenze, 1° del mese 9:30 report, domenica 18:00 riepilogo.
+// Cron ogni 30 minuti; decide in ora italiana: 9:30 scadenze, 1° del mese 9:30 report, domenica 20:00 riepilogo + diario.
 async function scheduled(_e: ScheduledController, env: Env) {
   const now = romeNow();
   if (now.hour === 9 && now.minute >= 30 && (await once(env, 'last_daily', now.date))) {
@@ -366,7 +366,7 @@ async function scheduled(_e: ScheduledController, env: Env) {
     const msg = await monthlyMessage(env.DB, now.month);
     console.log(JSON.stringify({ level: 'info', msg: 'push report mensile', sent: await broadcast(env, 'monthly', msg) }));
   }
-  if (now.weekday === 'Sun' && now.hour === 18 && now.minute < 30 && (await once(env, 'last_weekly', now.date))) {
+  if (now.weekday === 'Sun' && now.hour === 20 && now.minute < 30 && (await once(env, 'last_weekly', now.date))) {
     const msg = await weeklyMessage(env.DB, now.date, now.month);
     console.log(JSON.stringify({ level: 'info', msg: 'push settimana', sent: await broadcast(env, 'weekly', msg) }));
   }

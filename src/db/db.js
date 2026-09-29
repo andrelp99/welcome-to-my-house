@@ -39,11 +39,17 @@ db.version(4).stores({
   meal_plan: 'id, date, recipe_id',
 });
 
+// 0.12: pasti (luogo, costo) e impostazioni condivise
+db.version(5).stores({
+  meals: 'id, date',
+  settings: 'id',
+});
+
 export const SYNC_TABLES = [
   'locations', 'categories', 'stores', 'products', 'receipts',
   'purchase_lines', 'stock_lots', 'shopping_items', 'extra_expenses', 'budgets',
   'recipes', 'recipe_ingredients', 'recipe_steps', 'substitutions', 'events', 'receipt_aliases',
-  'meal_plan',
+  'meal_plan', 'meals', 'settings',
 ];
 
 export const alive = (r) => r && !r.deleted;

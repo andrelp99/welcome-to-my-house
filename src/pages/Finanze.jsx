@@ -13,6 +13,7 @@ import {
 import { euro, fmtQty, todayISO } from '../db/logic.js';
 import { put, save, undo } from '../db/repo.js';
 import { deletePhoto } from '../db/photos.js';
+import { shoppingHabits, productHabits, offList, boughtVsWasted, categoriesByMonth } from '../db/habits.js';
 
 const eur0 = (v) => (v == null ? '—' : v.toLocaleString('it-IT', { style: 'currency', currency: 'EUR', maximumFractionDigits: v >= 100 ? 0 : 2 }));
 const pct = (a, b) => (b ? Math.round((a / b - 1) * 100) : null);
@@ -52,6 +53,7 @@ export default function Finanze() {
           { value: 'prezzi', label: 'Prezzi' },
           { value: 'affari', label: 'Affari' },
           { value: 'sprechi', label: 'Sprechi' },
+          { value: 'abitudini', label: 'Abitudini' },
         ]}
       />
       {tab === 'overview' && <Overview fin={fin} month={month} />}
@@ -59,6 +61,7 @@ export default function Finanze() {
       {tab === 'prezzi' && <Prezzi fin={fin} />}
       {tab === 'affari' && <Affari fin={fin} month={month} />}
       {tab === 'sprechi' && <Sprechi fin={fin} month={month} />}
+      {tab === 'abitudini' && <Abitudini fin={fin} />}
     </div>
   );
 }
@@ -528,6 +531,134 @@ function Sprechi({ fin, month }) {
           </Box>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Abitudini di spesa (dai check-in) ──
+const CAT_COL = ['#d9a441', '#e0605a', '#4aa3d8', '#5fbf7a', '#b9a4f0', '#f08bb4'];
+const dmy = (d) => (d ? d.split('-').reverse().join('/') : '—');
+function Abitudini({ fin }) {
+  const sh = useMemo(() => shoppingHabits(fin), [fin]);
+  const ph = useMemo(() => productHabits(fin), [fin]);
+  const ol = useMemo(() => offList(fin), [fin]);
+  const bw = useMemo(() => boughtVsWasted(fin, ph), [fin, ph]);
+  const cm = useMemo(() => categoriesByMonth(fin), [fin]);
+  const [q, setQ] = useState('');
+  const [open, setOpen] = useState(null);
+  if (!sh.count) return <Empty icon={Receipt}>Ancora nessuno scontrino. Le abitudini si riempiono spesa dopo spesa (check-in dalla lista o foto scontrino).</Empty>;
+  const s = q.trim().toLowerCase();
+  const found = s ? ph.all.filter((x) => x.p.name.toLowerCase().includes(s)).sort((a, b) => b.times - a.times).slice(0, 8) : [];
+  const days = (v) => (v == null ? '—' : `${Math.round(v)} gg`);
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      <Box title="Come fai la spesa" icon={Receipt}>
+        <div className="grid grid-cols-2 gap-2 text-sm">
+          {[
+            [sh.perMonth.toFixed(1).replace('.', ','), 'spese al mese'],
+            [days(sh.avgGap), 'in media tra una e l’altra'],
+            [eur0(sh.avgTicket), 'scontrino medio'],
+            [dmy(sh.lastDate), 'ultima spesa'],
+          ].map(([v, l]) => (
+            <div key={l} className="rounded-md bg-bg-elevated p-2.5">
+              <div className="text-lg font-bold tabular-nums">{v}</div>
+              <div className="text-xs text-text-muted">{l}</div>
+            </div>
+          ))}
+        </div>
+        <div className="text-xs text-text-muted">Giorno della settimana</div>
+        <Bars items={sh.byWd} height={90} format={(v) => v} />
+      </Box>
+      <Box title="Dove" icon={Target}>
+        <HBars items={sh.byChain.map((c) => ({ label: `${c.label} · ${c.value} spese`, value: c.total }))} format={eur0} />
+      </Box>
+      <Box title="Quando l’ho preso l’ultima volta?" icon={Search}>
+        <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cerca un prodotto…" />
+        {s && !found.length && <p className="text-sm text-text-muted">Mai comprato (secondo gli scontrini).</p>}
+        <ul className="divide-y divide-bg-border">
+          {found.map((x) => (
+            <li key={x.p.id} className="py-2 text-sm">
+              <button type="button" className="w-full text-left" onClick={() => setOpen(open === x.p.id ? null : x.p.id)}>
+                <div className="flex justify-between gap-2"><b className="truncate">{x.p.name}</b><span className="shrink-0 text-text-muted">{x.since === 0 ? 'oggi' : `${x.since} gg fa`}</span></div>
+                <div className="text-xs text-text-muted">{x.times} volte · ogni {days(x.every)} · {eur0(x.spent)} in tutto{x.next ? ` · prossimo ~${dmy(x.next)}` : ''}</div>
+              </button>
+              {open === x.p.id && (
+                <ul className="mt-1 text-xs text-text-secondary">
+                  {x.lines.slice(0, 10).map((l) => (
+                    <li key={l.id} className="flex justify-between gap-2 py-0.5">
+                      <span>{dmy(l.date)} · {l.chain}</span>
+                      <span className="tabular-nums">{fmtQty(l.qty)} {l.unit} · {eur0(l.price_paid)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </li>
+          ))}
+        </ul>
+      </Box>
+      <Box title="Cosa compri più spesso" icon={TrendingUp}>
+        <HBars items={ph.top.slice(0, 8).map((x) => ({ label: `${x.p.name}${x.every ? ` · ogni ${days(x.every)}` : ''}`, value: x.times }))} format={(v) => `${v}×`} />
+      </Box>
+      <Box title="Dove va la spesa (prodotti)" icon={Wallet}>
+        <HBars items={ph.topSpent.slice(0, 8).map((x) => ({ label: x.p.name, value: x.spent }))} format={eur0} />
+      </Box>
+      <Box title="In arrivo (previsti)" icon={Lightbulb}>
+        {ph.dueSoon.length ? (
+          <ul className="text-sm divide-y divide-bg-border">
+            {ph.dueSoon.map((x) => (
+              <li key={x.p.id} className="flex justify-between gap-2 py-1.5"><span className="truncate">{x.p.name}</span><span className="text-text-muted shrink-0">~{dmy(x.next)}</span></li>
+            ))}
+          </ul>
+        ) : <p className="text-sm text-text-muted">Servono almeno 3 acquisti dello stesso prodotto.</p>}
+      </Box>
+      <Box title="Non lo compri più" icon={ImageOff}>
+        {ph.stopped.length ? (
+          <ul className="text-sm divide-y divide-bg-border">
+            {ph.stopped.slice(0, 10).map((x) => (
+              <li key={x.p.id} className="flex justify-between gap-2 py-1.5"><span className="truncate">{x.p.name}</span><span className="text-text-muted shrink-0">da {x.since} gg (di solito ogni {days(x.every)})</span></li>
+            ))}
+          </ul>
+        ) : <p className="text-sm text-text-muted">Niente di abbandonato.</p>}
+        {ph.once.length > 0 && <p className="text-xs text-text-muted">Comprati una volta sola: {ph.once.slice(0, 12).map((x) => x.p.name).join(', ')}{ph.once.length > 12 ? ` +${ph.once.length - 12}` : ''}.</p>}
+      </Box>
+      <Box title="Fuori lista" icon={BadgePercent}>
+        {ol.known ? (
+          <>
+            <p className="text-sm">
+              <b>{Math.round((ol.off / ol.known) * 100)}%</b> degli articoli non era in lista ({eur0(ol.spentOff)}).
+            </p>
+            <HBars items={ol.top.slice(0, 6)} format={(v) => `${v}×`} />
+          </>
+        ) : <p className="text-sm text-text-muted">Si conta dai prossimi check-in (confronto lista ↔ scontrino).</p>}
+      </Box>
+      <Box title="Comprato e buttato" icon={Trash2}>
+        {bw.length ? (
+          <ul className="text-sm divide-y divide-bg-border">
+            {bw.slice(0, 8).map((x) => (
+              <li key={x.p.id} className="flex justify-between gap-2 py-1.5"><span className="truncate">{x.p.name}</span><span className="shrink-0 tabular-nums">{x.pct != null ? `${x.pct}%` : '—'} <span className="text-text-muted text-xs">({fmtQty(x.wasted)} su {fmtQty(x.bought)} {x.unit})</span></span></li>
+            ))}
+          </ul>
+        ) : <p className="text-sm text-text-muted">Niente buttato: bene così.</p>}
+      </Box>
+      <Box title="Categorie mese per mese" icon={TrendingUp}>
+        <div className="space-y-1.5">
+          {cm.months.map((m) => {
+            const tot = Object.values(m.parts).reduce((a, b) => a + b, 0);
+            return (
+              <div key={m.month} className="grid grid-cols-[3.5rem_1fr_4rem] items-center gap-2 text-xs">
+                <span className="capitalize text-text-muted">{monthLabel(m.month).split(' ')[0].slice(0, 3)}</span>
+                <div className="flex h-3 rounded-full overflow-hidden bg-bg-elevated">
+                  {tot > 0 && cm.top.map((c, i) => <div key={c} title={`${c}: ${eur0(m.parts[c] || 0)}`} style={{ width: `${((m.parts[c] || 0) / tot) * 100}%`, background: CAT_COL[i] }} />)}
+                </div>
+                <span className="tabular-nums text-right">{eur0(tot)}</span>
+              </div>
+            );
+          })}
+        </div>
+        <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-text-muted">
+          {cm.top.map((c, i) => <span key={c} className="inline-flex items-center gap-1"><i className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: CAT_COL[i] }} />{c}</span>)}
+        </div>
+      </Box>
     </div>
   );
 }

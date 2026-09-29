@@ -1,4 +1,5 @@
 // Contenuti delle notifiche calcolati dal server su D1 (stesse regole dell'app).
+import { toDish, periodContext, evaluate, goalConfig, weekStartIso, addDaysIso, mealId, OUT_PLACES } from '../src/db/variety.js';
 
 type Row = Record<string, any>;
 const FREEZER_DEFAULT_MONTHS = 3;
@@ -110,7 +111,7 @@ async function suggestRecipes(db: D1Database, stock: Record<string, number>, exp
 
 const euro = (v: number) => `${v.toFixed(2).replace('.', ',')} €`;
 
-// Domenica 18:00: cosa scade, cosa manca, 3 ricette, spesa della settimana vs budget.
+// Domenica 20:00: diario (varietà, pasti fuori, pasti da registrare), cosa scade, cosa manca, 3 ricette, spesa della settimana vs budget.
 export async function weeklyMessage(db: D1Database, today: string, month: string) {
   const { stock, expiring, below } = await loadState(db, today);
   const weekAgo = addDays(today, -6);
@@ -133,7 +134,53 @@ export async function weeklyMessage(db: D1Database, today: string, month: string
   parts.push(`Spesa settimana ${euro(week?.t || 0)}${budget?.t ? ` · mese ${euro(spent?.t || 0)} su ${euro(budget.t)}` : ''}`);
   if (ideas.length) parts.push(`Idee: ${ideas.join(', ')}`);
   parts.push(planned?.n ? `Pianificati ${planned.n} pasti` : 'Settimana da pianificare');
-  return { title: 'Riepilogo della settimana', body: parts.join('\n'), url: planned?.n ? '/planner' : '/', tag: 'settimana' };
+  const recap = await weekRecap(db, today).catch(() => null);
+  if (recap) parts.unshift(...recap);
+  return { title: 'Riepilogo della settimana', body: parts.join('\n'), url: '/planner', tag: 'settimana' };
+}
+
+// Diario della settimana: varieta', pasti fuori, pasti non registrati (pranzo/cena; domenica sera esclusa).
+const WD_IT = ['lun', 'mar', 'mer', 'gio', 'ven', 'sab', 'dom'];
+async function weekRecap(db: D1Database, today: string) {
+  const from = weekStartIso(today);
+  const to = addDaysIso(from, 6);
+  const [plan, recipes, meals, events, goalsRow] = await Promise.all([
+    all(db, 'SELECT * FROM meal_plan WHERE deleted = 0 AND done = 1 AND date >= ? AND date <= ?', from, to),
+    all(db, 'SELECT id, title, course, main_food, second_food, features, rating, want_freq FROM recipes WHERE deleted = 0'),
+    all(db, 'SELECT * FROM meals WHERE deleted = 0 AND date >= ? AND date <= ?', from, to),
+    all(db, "SELECT type, date FROM events WHERE deleted = 0 AND date >= ? AND date <= ?", from, to),
+    db.prepare("SELECT value FROM settings WHERE id = 'goals' AND deleted = 0").first<{ value: string }>(),
+  ]);
+  const R = Object.fromEntries(recipes.map((r) => [r.id, r]));
+  const M = Object.fromEntries(meals.map((m) => [m.id, m]));
+  const dishes = plan.map((e) => toDish(e, R[e.recipe_id] || R[e.leftover_of] || null, M[mealId(e.date, e.meal)]));
+  const missing: string[] = [];
+  for (let i = 0; i < 7; i++) {
+    const d = addDaysIso(from, i);
+    for (const m of ['pranzo', 'cena']) {
+      if (d > today || (d === today && m === 'cena')) continue;
+      if (!dishes.some((x: any) => x.date === d && x.meal === m)) missing.push(`${WD_IT[i]} ${m}`);
+    }
+  }
+  if (!dishes.length) return [`Diario vuoto questa settimana: registra i pasti per la varietà`];
+  let saved = null;
+  try {
+    saved = goalsRow?.value ? JSON.parse(goalsRow.value) : null;
+  } catch {
+    saved = null;
+  }
+  const goals = goalConfig(saved).filter((g: any) => g.period === 'week');
+  const ctx = periodContext({ all: dishes, mealsById: M, events, recipesById: R, from, to });
+  const ev = evaluate(goals, ctx, to);
+  const todo = ev.rows.filter((r: any) => r.status === 'todo').map((r: any) => r.label.toLowerCase());
+  const over = ev.rows.filter((r: any) => r.status === 'over').map((r: any) => r.label.toLowerCase());
+  const out = [`Varietà ${ev.score}/100 · ${ev.okCount}/${ev.rows.length} obiettivi`];
+  if (todo.length) out.push(`Mancati: ${todo.slice(0, 4).join(', ')}${todo.length > 4 ? '…' : ''}`);
+  if (over.length) out.push(`Oltre il limite: ${over.join(', ')}`);
+  const outMeals = meals.filter((m) => OUT_PLACES.includes(m.place) && dishes.some((d: any) => d.date === m.date && d.meal === m.meal));
+  if (outMeals.length) out.push(`Pasti fuori ${outMeals.length}${outMeals.some((m) => m.cost) ? ` · ${euro(outMeals.reduce((s, m) => s + (m.cost || 0), 0))}` : ''}`);
+  if (missing.length) out.push(`Da registrare: ${missing.slice(0, 5).join(', ')}${missing.length > 5 ? ` +${missing.length - 5}` : ''}`);
+  return out;
 }
 
 const prevMonthOf = (month: string, n = 1) => {

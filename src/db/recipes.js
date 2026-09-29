@@ -255,14 +255,26 @@ export function recipeStatus(ings, scale, data, subs) {
   };
 }
 
+const MEAL_ORDER = { colazione: 0, pranzo: 1, merenda: 2, cena: 3 };
+const parseJson = (v) => {
+  try {
+    return typeof v === 'string' ? JSON.parse(v) : v;
+  } catch {
+    return null;
+  }
+};
+
 // Raggruppa le righe delle tabelle figlie per ricetta.
 export async function loadRecipes() {
-  const [recipes, ings, steps, subs, plan] = await Promise.all([
+  const [recipes, ings, steps, subs, plan, meals, settings, events] = await Promise.all([
     db.recipes.toArray(),
     db.recipe_ingredients.toArray(),
     db.recipe_steps.toArray(),
     db.substitutions.toArray(),
     db.meal_plan.toArray(),
+    db.meals.toArray(),
+    db.settings.toArray(),
+    db.events.toArray(),
   ]);
   const group = (arr) => {
     const g = {};
@@ -279,7 +291,10 @@ export async function loadRecipes() {
     steps: group(steps),
     subs: subsBy,
     subList: subs.filter(alive),
-    plan: plan.filter(alive).sort((a, b) => a.date.localeCompare(b.date) || (a.meal === b.meal ? 0 : a.meal === 'pranzo' ? -1 : 1)),
+    plan: plan.filter(alive).sort((a, b) => a.date.localeCompare(b.date) || MEAL_ORDER[a.meal] - MEAL_ORDER[b.meal]),
+    meals: Object.fromEntries(meals.filter(alive).map((m) => [m.id, m])),
+    settings: Object.fromEntries(settings.filter(alive).map((x) => [x.id, parseJson(x.value)])),
+    events: events.filter(alive),
   };
 }
 
@@ -343,7 +358,7 @@ function consumeOps(product, qty, data) {
 
 // "Ho cucinato": scala la dispensa, registra eventi, crea avanzi in frigo/freezer.
 // uses: [{ product, qty }] in unita' prodotto. leftovers: { portions, location_id }
-export async function cookRecipe({ recipe, servings, uses, leftovers, data }) {
+export async function cookRecipe({ recipe, servings, uses, leftovers, data, extraOps = [] }) {
   const date = todayISO();
   const ops = [];
   for (const { product, qty } of uses) {
@@ -379,6 +394,7 @@ export async function cookRecipe({ recipe, servings, uses, leftovers, data }) {
       },
     });
   }
+  ops.push(...extraOps);
   await save(ops, `Cucinato: ${recipe.title}`);
   await autoAddBelowStock();
 }

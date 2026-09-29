@@ -270,7 +270,7 @@ function CheckIn({ data, items, initial, onClose }) {
       const full = n(l.price_full);
       ops.push({
         table: 'purchase_lines',
-        row: { id: plid, receipt_id: rid, product_id: l.p?.id || null, qty: l.qty, unit: l.unit, price_paid: paid, price_full: full, discount: full != null && paid != null ? Math.round((full - paid) * 100) / 100 : null, offer_type: l.raw ? l.raw.slice(0, 80) : null },
+        row: { id: plid, receipt_id: rid, product_id: l.p?.id || null, qty: l.qty, unit: l.unit, price_paid: paid, price_full: full, discount: full != null && paid != null ? Math.round((full - paid) * 100) / 100 : null, offer_type: l.raw ? l.raw.slice(0, 80) : null, from_list: l.it ? 1 : 0 },
       });
       if (l.p && l.qty > 0)
         ops.push({

@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router';
-import { Plus, ListChecks, BookMarked, Search, ChevronDown, Pencil, Snowflake, PackageOpen, Flame, ShieldCheck, Star, Minus, Trash2 } from 'lucide-react';
-import { useData, showToast } from '../hooks/useData.js';
+import { Plus, ListChecks, BookMarked, Search, ChevronDown, Pencil, Snowflake, PackageOpen, Flame, ShieldCheck, Star, Minus, Trash2, UtensilsCrossed } from 'lucide-react';
+import { eatLeftover } from '../db/meals.js';
+import { useData, useRecipes, showToast } from '../hooks/useData.js';
 import { undo } from '../db/repo.js';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db.js';
@@ -12,6 +13,7 @@ import { lotStatus, LEVEL_ORDER, fmtQty, setTotalQty, minStock, stepForProduct, 
 
 export default function Inventario({ area, title, subtitle }) {
   const data = useData();
+  const rec = useRecipes();
   const consumi = useLiveQuery(() => db.events.where('type').equals('consumo').toArray(), []);
   const left = useMemo(() => (data && consumi ? Object.fromEntries(depletion(consumi, data).map((x) => [x.p.id, x.days])) : {}), [data, consumi]);
   const [tab, setTab] = useState('all');
@@ -115,7 +117,7 @@ export default function Inventario({ area, title, subtitle }) {
           <h2 className="text-xs uppercase tracking-wider font-semibold text-text-muted px-1">{c.name}</h2>
           <div className="rounded-lg border border-bg-border bg-bg-surface divide-y divide-bg-border overflow-hidden">
             {items.map((r) => (
-              <ProductRow key={r.p.id} r={r} data={data} left={left[r.p.id]} count={count} open={open === r.p.id} onToggle={() => setOpen(open === r.p.id ? null : r.p.id)} setModal={setModal} />
+              <ProductRow key={r.p.id} r={r} data={data} rec={rec} left={left[r.p.id]} count={count} open={open === r.p.id} onToggle={() => setOpen(open === r.p.id ? null : r.p.id)} setModal={setModal} />
             ))}
           </div>
         </section>
@@ -127,7 +129,7 @@ export default function Inventario({ area, title, subtitle }) {
   );
 }
 
-function ProductRow({ r, data, left, count, open, onToggle, setModal }) {
+function ProductRow({ r, data, rec, left, count, open, onToggle, setModal }) {
   const { p, lots, worst, total, min } = r;
   const under = min != null && total < min;
   const unit = lots[0]?.lot.unit || p.default_unit;
@@ -180,6 +182,17 @@ function ProductRow({ r, data, left, count, open, onToggle, setModal }) {
                   </div>
                 </div>
                 <ExpiryBadge status={st} />
+                {lot.is_leftover && rec ? (
+                  <IconButton
+                    label="Mangiato 1 porzione"
+                    onClick={async () => {
+                      await eatLeftover(lot, p, data, rec);
+                      showToast(`Mangiato: ${p.name.replace(/^Avanzo: /, '')} (nel diario)`, { label: 'Annulla', run: () => undo() });
+                    }}
+                  >
+                    <UtensilsCrossed size={16} />
+                  </IconButton>
+                ) : null}
                 {p.area === 'cibo' && !frozen && !lot.opened_at && (
                   <IconButton label="Aperto oggi" onClick={() => quickLotAction('open', lot, p)}><PackageOpen size={16} /></IconButton>
                 )}

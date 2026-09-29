@@ -79,7 +79,7 @@ worker/ai.ts           interfaccia AI unica (ricetta, scontrino) con modello di 
 worker/importer.ts     import da link (JSON-LD schema.org) e copia foto remote in D1
 worker/webpush.ts      Web Push: VAPID ES256 + cifratura aes128gcm
 worker/digest.ts       contenuti notifiche: scadenze, riepilogo settimana, report mensile
-migrations/            schema D1: 0001_init … 0009_classificazione
+migrations/            schema D1: 0001_init … 0010_diario_varieta
 src/db/                Dexie, sync, logica dispensa, ricette, import, collega ingredienti, scontrino, planner, stagionalità, finanze, foto, push
 src/pages/             Home, Casa/Dispensa (Inventario), Spesa, Ricette (+ dettaglio, editor, import, cucina), Planner, Finanze, Catalogo, Impostazioni
 src/components/        ui/ (kit, layout, card), forms, recipes, charts
@@ -156,7 +156,7 @@ Foto in D1 (non R2): nessun bucket da creare, limite free 5 GB ampiamente suffic
 
 - **Planner** (`/planner`, tabella `meal_plan`): pranzo/cena per giorno, ricetta + porzioni o nota libera. "Genera lista" somma i fabbisogni dei pasti da oggi a domenica, toglie la dispensa e i sostituti disponibili → `shopping_items` origine `planner`. "Ho cucinato" dal planner segna il pasto fatto.
 - **Notifiche push**: Web Push senza librerie (`worker/webpush.ts`: VAPID ES256 + cifratura aes128gcm). Chiavi VAPID create al primo uso in `server_kv`: nessun secret da configurare. Attivazione per dispositivo in Impostazioni → Notifiche (con invio di prova).
-- **Cron** `*/30 * * * *` (`wrangler.jsonc` → `triggers`): decide in ora italiana (`worker/digest.ts`). 9:30 scadenze, solo se qualcosa entra oggi nella finestra di avviso o scade entro domani. Domenica 18:00 riepilogo: cosa scade, sotto scorta, spesa settimana vs budget, 3 ricette fattibili, pasti pianificati.
+- **Cron** `*/30 * * * *` (`wrangler.jsonc` → `triggers`): decide in ora italiana (`worker/digest.ts`). 9:30 scadenze, solo se qualcosa entra oggi nella finestra di avviso o scade entro domani. Domenica 20:00 riepilogo (da 0.12 anche diario: varietà, pasti fuori, pasti da registrare): cosa scade, sotto scorta, spesa settimana vs budget, 3 ricette fattibili, pasti pianificati.
 - **Stagionalità** (`src/db/season.js`): frutta e verdura del mese, filtro "di stagione" nel ricettario e nel planner (almeno un ingrediente di stagione e nessuno fuori stagione; conserve escluse).
 - **Stima lista per supermercato**: ultimo prezzo pagato per catena, confrontato solo sui prodotti con prezzo noto in tutte.
 
@@ -216,3 +216,17 @@ Sostituisce i tag AI liberi della 0.10 (quei tag ora sono nascosti per non dupli
 - **Ricettario**: filtri Portata, Base (gruppo o sotto, principale o secondario), Tempo, Difficoltà + pannello "Caratteristiche". Editor ricetta: base, secondario, caratteristiche.
 - **Catalogo**: pulsante fisso "Durate e porzioni".
 - Migrazione `0009_classificazione.sql`: PRIMA del push.
+
+## Diario pasti e varietà (0.12.0)
+
+- **Diario**: ogni riga `meal_plan` è un piatto; `done = 1` = mangiato. Tipi di piatto: ricetta (`recipe_id`), avanzo (`leftover_of`), scritto a mano (`note` + `dish_course`, `dish_main`, `dish_second`, `dish_features`, `dish_ings` fino a 3 prodotti). `auto = 1` = proposta di "Riempi". `used_expiring` = ingredienti in scadenza usati.
+- **Pasti** (`meals`, id `ml-AAAA-MM-GG-pasto`): luogo (casa, ristorante, lavoro/mensa, amici/parenti, delivery) e costo; costo fuori casa → `extra_expenses` categoria "ristoranti" (id `ex-<pasto>`). Colazione e merenda facoltative (Planner → toggle, salvato in `settings.planner`).
+- **Ho cucinato**: scala la dispensa + scrive nel diario (pasto dall'ora, modificabile; segna fatto il pianificato invece di duplicare) + "Com'era?" (stelle). Tutto in una sola operazione annullabile. **Avanzi**: "Mangiato" in dispensa o nel modale Aggiungi piatto → −1 porzione + piatto nel diario.
+- **Stelle** (`recipes.rating` 1–5) e **frequenza** (`recipes.want_freq` 1–5, 0 = non propormela; 5 = 7 gg, 4 = 14, 3 = 30, 2 = 75, 1 = 150). Nel dettaglio ricetta, con storico (volte, ultima, elenco).
+- **Obiettivi** (`src/db/variety.js`, puro: lo usa anche il Worker): 23 settimanali + 5 mensili, modificabili (Planner → ⚙ in Varietà), salvati in `settings.goals`. Dashboard settimana/mese nel planner con 8 caselle al giorno.
+- **Consigliate** (`scoreRecipe`): varietà / gradimento / ritardo / scadenze / fattibile, pesi in Impostazioni → Proposte ricette (`settings.weights`, default 32/28/14/18/8). Escluse "non propormela" e le ricette fatte da meno di metà intervallo. Usato da Home, ricettario (ordinamento predefinito), Aggiungi piatto, Riempi.
+- **Riempi con proposte**: giorni e pasti scelti, solo vuoti, varietà rispettata anche tra le proposte (niente contorni/antipasti/dolci a pranzo e cena), ricetta cambiabile per slot, "Togli proposte" sui giorni scelti.
+- **Analisi** (planner): andamento varietà, basi del mese, calendario pasti, casa/fuori/delivery, costo a porzione, gradimento, tempo in cucina, serie e record, anti-spreco.
+- **Finanze → Abitudini** (`src/db/habits.js`): frequenza spesa, giorni, negozi, "quando l'ho preso l'ultima volta", più comprati, dove va la spesa, previsti, non più comprati, fuori lista (`purchase_lines.from_list`, dai check-in 0.12), comprato e buttato, categorie mese per mese.
+- **Domenica 20:00**: riepilogo con varietà, obiettivi mancati/sforati, pasti fuori, pasti da registrare (pranzo/cena, esclusa la cena di domenica).
+- Migrazione `0010_diario_varieta.sql`: PRIMA del push.

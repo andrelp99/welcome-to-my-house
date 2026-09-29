@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { KeyRound, Palette, Info, RefreshCw, History, Undo2, Download, Upload, BookMarked, Bell } from 'lucide-react';
+import { KeyRound, Palette, Info, RefreshCw, History, Undo2, Download, Upload, BookMarked, Bell, SlidersHorizontal } from 'lucide-react';
+import { weightsOf, saveSetting } from '../db/meals.js';
+import { DEFAULT_WEIGHTS, WEIGHT_LABELS } from '../db/variety.js';
 import { Card } from '../components/ui/Card.jsx';
 import { ThemeToggle } from '../components/ui/ThemeToggle.jsx';
 import { Button, Toggle } from '../components/ui/kit.jsx';
 import { pushSupported, enablePush, disablePush, pushStatus, setPushPrefs, testPush } from '../db/push.js';
 import { getHouseKey, apiFetch, ApiError } from '../api/client.js';
-import { useSyncState, showToast } from '../hooks/useData.js';
+import { useSyncState, showToast, useRecipes } from '../hooks/useData.js';
 import { syncNow, deviceId } from '../db/sync.js';
 import { db, SYNC_TABLES, alive } from '../db/db.js';
 import { undo, save } from '../db/repo.js';
@@ -125,6 +127,8 @@ export default function Impostazioni() {
         <Link to="/catalogo" className="text-brand font-semibold text-sm">Gestisci prodotti, preferiti ed essenziali →</Link>
       </Card>
 
+      <Pesi />
+
       <Card title="Tema" icon={Palette}>
         <div className="flex items-center justify-between">
           <p className="text-text-secondary text-sm">Scuro di default, chiaro su richiesta.</p>
@@ -135,7 +139,7 @@ export default function Impostazioni() {
         <p className="text-text-secondary text-sm">{key ? 'Dispositivo attivato.' : 'Dispositivo non attivato: apri il link di attivazione.'}</p>
       </Card>
       <Card title="Versione" icon={Info}>
-        <p className="text-text-secondary text-sm">0.11.0 · classificazione ricette</p>
+        <p className="text-text-secondary text-sm">0.12.0 · diario pasti e varietà</p>
       </Card>
     </div>
   );
@@ -183,7 +187,7 @@ function Notifiche() {
           {st?.subscribed && (
             <>
               <Toggle checked={prefs.daily !== false} onChange={(v) => setPref('daily', v)} label="Scadenze ogni giorno alle 9:30 (solo se serve)" />
-              <Toggle checked={prefs.weekly !== false} onChange={(v) => setPref('weekly', v)} label="Riepilogo domenica alle 18:00" />
+              <Toggle checked={prefs.weekly !== false} onChange={(v) => setPref('weekly', v)} label="Riepilogo domenica alle 20:00 (varietà, pasti da registrare)" />
               <Toggle checked={prefs.monthly !== false} onChange={(v) => setPref('monthly', v)} label="Report mensile il 1° alle 9:30" />
               <div className="flex flex-wrap gap-2 pt-1">
                 <Button variant="ghost" disabled={busy} onClick={() => run(() => testPush('daily'), 'Inviata anteprima scadenze')}>Prova scadenze</Button>
@@ -276,6 +280,41 @@ function Cronologia({ sync }) {
           </div>
         </div>
       )}
+    </Card>
+  );
+}
+
+// Pesi dell'ordinamento "Consigliate" (salvati e sincronizzati).
+const WEIGHT_HINT = { var: 'non ripetere, aiutare gli obiettivi', grad: 'le tue stelle ★', rit: 'rispetto alla frequenza 🔁', scad: 'usa cose che scadono', fatt: 'hai già gli ingredienti' };
+function Pesi() {
+  const rec = useRecipes();
+  const [w, setW] = useState(null);
+  useEffect(() => {
+    if (rec && !w) setW(weightsOf(rec));
+  }, [rec, w]);
+  if (!w) return null;
+  const saved = weightsOf(rec);
+  const dirty = Object.keys(w).some((k) => Number(w[k]) !== Number(saved[k]));
+  const sum = Object.values(w).reduce((a, b) => a + Number(b), 0);
+  return (
+    <Card title="Proposte ricette" icon={SlidersHorizontal}>
+      <p className="text-text-secondary text-sm mb-3">Quanto conta ogni aspetto nell'ordinamento “Consigliate” (Home, ricettario, Riempi planner).</p>
+      <div className="space-y-3">
+        {Object.keys(DEFAULT_WEIGHTS).map((k) => (
+          <div key={k} className="grid grid-cols-[1fr_auto] gap-x-3 items-center">
+            <label htmlFor={`w-${k}`} className="text-sm font-semibold">
+              {WEIGHT_LABELS[k]} <span className="block text-xs font-normal text-text-muted">{WEIGHT_HINT[k]}</span>
+            </label>
+            <span className="tabular-nums font-bold text-sm w-8 text-right">{w[k]}</span>
+            <input id={`w-${k}`} type="range" min="0" max="60" step="1" value={w[k]} onChange={(e) => setW((x) => ({ ...x, [k]: Number(e.target.value) }))} className="col-span-2 w-full accent-brand" />
+          </div>
+        ))}
+      </div>
+      <p className="text-xs text-text-muted mt-2">{sum === 100 ? 'Somma 100.' : `Somma ${sum}: conta la proporzione.`}</p>
+      <div className="flex flex-wrap gap-2 mt-3">
+        <Button disabled={!dirty} onClick={async () => { await saveSetting('weights', w, 'Pesi proposte'); showToast('Pesi salvati', { label: 'Annulla', run: () => undo() }); }}>Salva</Button>
+        <Button variant="ghost" onClick={() => setW({ ...DEFAULT_WEIGHTS })}>Ripristina</Button>
+      </div>
     </Card>
   );
 }

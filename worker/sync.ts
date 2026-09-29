@@ -11,7 +11,7 @@ export const TABLES: Record<string, string[]> = {
     'pantry_days', 'fridge_days', 'uses_per_pack',
   ],
   receipts: ['id', 'store_id', 'date', 'total_paid', 'total_discount', 'photo_key', 'notes'],
-  purchase_lines: ['id', 'receipt_id', 'product_id', 'qty', 'unit', 'price_paid', 'price_full', 'discount', 'offer_type'],
+  purchase_lines: ['id', 'receipt_id', 'product_id', 'qty', 'unit', 'price_paid', 'price_full', 'discount', 'offer_type', 'from_list'],
   stock_lots: [
     'id', 'product_id', 'qty', 'unit', 'location_id', 'expiry_date', 'opened_at', 'frozen_at',
     'purchase_line_id', 'is_leftover', 'note',
@@ -22,14 +22,19 @@ export const TABLES: Record<string, string[]> = {
   recipes: [
     'id', 'title', 'servings', 'prep_min', 'cook_min', 'rest_min', 'difficulty', 'tags', 'diet_tags', 'nutrition',
     'photo_key', 'source_url', 'notes', 'favorite', 'cooked_count', 'last_cooked_at', 'course',
-    'main_food', 'second_food', 'features',
+    'main_food', 'second_food', 'features', 'rating', 'want_freq',
   ],
   recipe_ingredients: ['id', 'recipe_id', 'product_id', 'text', 'qty', 'unit', 'optional', 'grp', 'sort'],
   recipe_steps: ['id', 'recipe_id', 'sort', 'text', 'timer_min', 'photo_key'],
   substitutions: ['id', 'product_id', 'substitute_id', 'ratio', 'note'],
   events: ['id', 'type', 'product_id', 'recipe_id', 'qty', 'unit', 'value', 'date', 'note'],
   receipt_aliases: ['id', 'text', 'product_id', 'store_chain'],
-  meal_plan: ['id', 'date', 'meal', 'recipe_id', 'servings', 'note', 'done'],
+  meal_plan: [
+    'id', 'date', 'meal', 'recipe_id', 'servings', 'note', 'done', 'dish_course', 'dish_main', 'dish_second', 'dish_features',
+    'dish_ings', 'leftover_of', 'used_expiring', 'auto', 'done_at',
+  ],
+  meals: ['id', 'date', 'meal', 'place', 'cost', 'expense_id', 'note'],
+  settings: ['id', 'value'],
 };
 const TABLE_ORDER = Object.keys(TABLES); // ordine utile per le foreign key
 

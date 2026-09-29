@@ -3,7 +3,10 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { ArrowLeft, Pencil, Star, Clock, Flame, Hourglass, Gauge, ChefHat, UtensilsCrossed, ShoppingCart, Share2, FileDown, Trash2, Timer, ExternalLink, Plus } from 'lucide-react';
 import { useData, useRecipes, showToast } from '../hooks/useData.js';
 import { Button, IconButton, Stepper, Empty } from '../components/ui/kit.jsx';
-import { Photo, IngredientList, CookedModal, LinkModal } from '../components/recipes.jsx';
+import { Photo, IngredientList, CookedModal, LinkModal, Stars, freqText } from '../components/recipes.jsx';
+import { recipeHistory } from '../db/meals.js';
+import { PLACES, daysBetween } from '../db/variety.js';
+import { todayISO } from '../db/logic.js';
 import { ProductForm } from '../components/forms.jsx';
 import { recipeStatus, addMissingToList, recipeToText, parseList, joinList, suggestDiet, NO_PRODUCT } from '../db/recipes.js';
 import { fmtQty } from '../db/logic.js';
@@ -20,6 +23,7 @@ export default function RicettaDettaglio() {
   const data = useData();
   const rec = useRecipes();
   const recipe = rec?.byId[id];
+  const [showHist, setShowHist] = useState(false);
   const [servings, setServings] = useState(null);
   const [cooked, setCooked] = useState(false);
   const [linking, setLinking] = useState(null);
@@ -49,6 +53,8 @@ export default function RicettaDettaglio() {
   const tags = cleanTags(recipe.tags, recipe.title);
   const auto = autoTags(recipe, ings, steps);
   const urgent = urgentOf(ings, expiringSet(data), data);
+  const hist = recipeHistory(rec, id);
+  const lastAgo = hist.length ? daysBetween(hist[0].date, todayISO()) : null;
   const cost = recipeCost(ings, scale, data);
   const nutri = nutritionOf(recipe);
   const feats = featuresOf(recipe, { kcal: nutri?.kcal ?? null, cost: recipeCost(ings, 1 / (recipe.servings || 1), data) });
@@ -144,6 +150,32 @@ export default function RicettaDettaglio() {
                 <Plus size={12} /> {t}?
               </button>
             ))}
+          </div>
+          <div className="grid gap-1 rounded-md border border-bg-border bg-bg-surface px-3 py-2 print:hidden">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sm text-text-secondary">Quanto mi piace</span>
+              <Stars value={recipe.rating || null} label="Gradimento" onChange={(v) => put('recipes', { id, rating: v }, `${recipe.title}: ${v ? `★${v}` : 'senza voto'}`)} />
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sm text-text-secondary">Quanto spesso <span className="text-text-muted text-xs">· {freqText(recipe.want_freq)}</span></span>
+              <Stars kind="freq" value={recipe.want_freq ?? null} label="Frequenza desiderata" onChange={(v) => put('recipes', { id, want_freq: v }, `${recipe.title}: frequenza ${freqText(v)}`)} />
+            </div>
+            <div className="text-xs text-text-muted">
+              {hist.length ? `Fatta ${hist.length} ${hist.length === 1 ? 'volta' : 'volte'} · ultima ${lastAgo === 0 ? 'oggi' : lastAgo === 1 ? 'ieri' : `${lastAgo} giorni fa`}` : 'Mai fatta (secondo il diario)'}
+              {hist.length > 0 && (
+                <button type="button" className="ml-2 text-brand font-semibold" onClick={() => setShowHist((v) => !v)}>{showHist ? 'nascondi' : 'storico'}</button>
+              )}
+            </div>
+            {showHist && (
+              <ul className="text-xs text-text-secondary divide-y divide-bg-border">
+                {hist.slice(0, 12).map((h) => (
+                  <li key={h.id} className="flex justify-between py-1">
+                    <span>{new Date(`${h.date}T12:00:00`).toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short', year: '2-digit' })} · {h.meal}{h.leftover_of ? ' · avanzo' : ''}</span>
+                    <span>{PLACES.find((p) => p.id === h.place)?.label}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
           <div className="flex flex-wrap gap-2 pt-1 print:hidden">
             <Button onClick={() => nav(`/ricette/${id}/cucina?porzioni=${servings}${planId ? `&piano=${planId}` : ''}`)} disabled={!steps.length}>
@@ -244,7 +276,7 @@ export default function RicettaDettaglio() {
         </section>
       )}
 
-      {cooked && <CookedModal recipe={recipe} status={status} servings={servings || 1} data={data} onClose={(ok) => { setCooked(false); if (ok && planId) put('meal_plan', { id: planId, done: 1 }); }} />}
+      {cooked && <CookedModal recipe={recipe} status={status} servings={servings || 1} data={data} rec={rec} planId={planId} urgent={urgent.length} onClose={() => setCooked(false)} />}
       {linking && (
         <LinkModal
           ing={linking}

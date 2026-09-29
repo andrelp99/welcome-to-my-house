@@ -10,12 +10,15 @@ import { put } from '../db/repo.js';
 import { Card } from '../components/ui/Card.jsx';
 import { ExpiryBadge, LEVEL_DOT } from '../components/ui/kit.jsx';
 import { useData, useSyncState, useRecipes } from '../hooks/useData.js';
-import { recipeStatus } from '../db/recipes.js';
+import { rankRecipes, mealFromClock, getSetting, isMealDish } from '../db/meals.js';
+import { AddDishModal } from '../components/diary.jsx';
+import { useState } from 'react';
 import { lotStatus, LEVEL_ORDER, belowStock, fmtQty, minStock, euro } from '../db/logic.js';
 
 export default function Home() {
   const data = useData();
   const rec = useRecipes();
+  const [ate, setAte] = useState(false);
   const consumi = useLiveQuery(() => db.events.where('type').equals('consumo').toArray(), []);
   const sync = useSyncState();
   const oggi = format(new Date(), 'EEEE d MMMM', { locale: it });
@@ -38,18 +41,7 @@ export default function Home() {
   const todayISOstr = format(new Date(), 'yyyy-MM-dd');
   const todayPlan = rec ? rec.plan.filter((e) => e.date === todayISOstr) : [];
   // Ricette fattibili, prima quelle che usano cose in scadenza
-  const expiring = new Set(warn.map((w) => w.p.id));
-  const cook =
-    data && rec
-      ? rec.list
-          .map((r) => {
-            const ings = rec.ings[r.id] || [];
-            return { r, st: recipeStatus(ings, 1 / (r.servings || 1), data, rec.subs), urgent: ings.filter((i) => expiring.has(i.product_id)).length };
-          })
-          .filter((x) => x.st.feasible || x.st.missing === 1)
-          .sort((a, b) => b.urgent - a.urgent || b.st.feasible - a.st.feasible || (a.r.last_cooked_at || '').localeCompare(b.r.last_cooked_at || ''))
-          .slice(0, 3)
-      : [];
+  const cook = data && rec ? rankRecipes(rec, data).filter((x) => x.total >= 0 && isMealDish(x.r)).slice(0, 3) : [];
 
   return (
     <div className="space-y-5">
@@ -125,15 +117,14 @@ export default function Home() {
             <p className="text-text-secondary text-sm">{rec?.list.length ? 'Nessuna ricetta fattibile con quello che hai.' : 'Ancora nessuna ricetta.'}</p>
           ) : (
             <ul className="space-y-1.5 text-sm">
-              {cook.map(({ r, urgent, st }) => (
+              {cook.map(({ r, total, reasons }) => (
                 <li key={r.id}>
-                  <Link to={`/ricette/${r.id}`} className="flex justify-between gap-2">
-                    <span className="truncate font-medium">{r.title}</span>
-                    {urgent > 0 ? (
-                      <span className="text-brand-accent text-xs shrink-0">usa {urgent} in scadenza</span>
-                    ) : !st.feasible ? (
-                      <span className="text-text-muted text-xs shrink-0">manca 1</span>
-                    ) : null}
+                  <Link to={`/ricette/${r.id}`} className="block">
+                    <span className="flex justify-between gap-2">
+                      <span className="truncate font-medium">{r.title}</span>
+                      <span className="text-brand text-xs font-bold tabular-nums shrink-0">{total}</span>
+                    </span>
+                    <span className="block truncate text-xs text-text-muted">{reasons.slice(0, 3).join(' · ')}</span>
                   </Link>
                 </li>
               ))}
@@ -172,20 +163,27 @@ export default function Home() {
             <ul className="space-y-1.5 text-sm">
               {todayPlan.map((e) => {
                 const r = e.recipe_id && rec.byId[e.recipe_id];
+                const lo = !r && e.leftover_of && rec.byId[e.leftover_of];
                 return (
                   <li key={e.id} className="flex justify-between gap-2">
-                    {r ? (
+                    {lo ? (
+                      <span className="truncate">Avanzo: {lo.title}</span>
+                    ) : r ? (
                       <Link to={`/ricette/${r.id}?porzioni=${e.servings}&piano=${e.id}`} className={`truncate font-medium ${e.done ? 'line-through text-text-muted' : ''}`}>{r.title}</Link>
                     ) : (
                       <span className="truncate">{e.note}</span>
                     )}
-                    <span className="text-text-muted text-xs shrink-0 capitalize">{e.meal}</span>
+                    <span className="text-text-muted text-xs shrink-0 capitalize">{e.done ? '✓ ' : ''}{e.meal}</span>
                   </li>
                 );
               })}
             </ul>
           )}
-          <Link to="/planner" className="block mt-3 text-brand font-semibold text-sm">Planner →</Link>
+          <div className="mt-3 flex items-center justify-between gap-2">
+            <button type="button" className="text-brand font-semibold text-sm" onClick={() => setAte(true)}>+ Cosa ho mangiato?</button>
+            <Link to="/planner" className="text-brand font-semibold text-sm">Planner →</Link>
+          </div>
+          {ate && <AddDishModal rec={rec} data={data} date={todayISOstr} meal={mealFromClock(!!getSetting(rec, 'planner', {})?.extraMeals)} done onClose={() => setAte(false)} />}
         </Card>
 
         <Card title={`Di stagione a ${monthName(month)}`} icon={Leaf}>
