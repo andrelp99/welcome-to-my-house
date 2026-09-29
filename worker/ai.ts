@@ -13,6 +13,7 @@ const RECIPE_SCHEMA = `{
  "servings": number|null,
  "prep_min": number|null, "cook_min": number|null, "rest_min": number|null,
  "difficulty": "facile"|"media"|"difficile"|null,
+ "course": "Antipasto"|"Primo"|"Secondo"|"Contorno"|"Piatto unico"|"Dolce"|"Salsa e sugo"|"Pane e lievitati"|"Colazione"|"Bevanda"|null,
  "tags": string[],
  "ingredients": [{"text": string, "qty": number|null, "unit": string|null, "group": string|null, "optional": boolean}],
  "steps": [{"text": string, "timer_min": number|null}],
@@ -37,6 +38,30 @@ Regole: una riga per articolo acquistato; "raw" = testo come stampato; "name" = 
 "count" = numero di pezzi (es. "2 x 1,29" -> 2); size_qty/size_unit = formato della confezione se scritto (es. "500G" -> 500, "g");
 "price_paid" = totale pagato per la riga DOPO sconti; se c'e' uno sconto/offerta sulla riga (righe tipo "SCONTO", "-0,50", "OFFERTA") "price_full" = prezzo prima dello sconto, altrimenti null.
 Ignora totali, resto, pagamenti, IVA, punti fedelta', sacchetti se non richiesti. Numeri con il punto decimale. Non inventare righe.`,
+
+  match: `Sei un assistente che collega ingredienti di ricette italiane ai prodotti di una dispensa di casa.
+Ricevi un catalogo prodotti (nomi esatti), le categorie disponibili (id: nome) e una lista numerata di ingredienti.
+Rispondi SOLO con JSON valido con questa forma:
+{ "items": [{"n": number, "catalog": string|null, "new": {"name": string, "category_id": string, "unit": "g"|"kg"|"ml"|"l"|"pz"|"conf", "location": "frigo"|"freezer"|"dispensa"}|null, "skip": boolean}] }
+Un elemento per ogni ingrediente, stesso "n".
+Regole:
+- "catalog" = il nome ESATTO di un prodotto del catalogo se e' lo stesso alimento che si compra (es. "Pecorino romano DOP da grattugiare" -> "Pecorino"; "Pomodorini datterini" -> "Pomodorini"; "Cosce di pollo" -> "Pollo" solo se non esiste un prodotto piu' specifico). Non collegare alimenti diversi (burro != margarina, brodo vegetale != dado, se non c'e' il dado).
+- Se nessun prodotto del catalogo va bene, "catalog" null e "new" = prodotto generico da creare: nome breve e comprabile al supermercato, senza quantita', marche o preparazioni (es. "rosmarino tritato" -> "Rosmarino"; "sedano 1 costa" -> "Sedano"); category_id tra quelli forniti; unit = come si conta in casa (g per spezie/erbe/formaggi/farine, ml per liquidi, pz per frutta/verdura a pezzi, conf per confezioni); location = dove si tiene.
+- "skip" true solo per cose che non si comprano o non si tengono in dispensa (acqua del rubinetto, ghiaccio, acqua di cottura, "q.b." senza alimento): allora catalog e new null.
+- Non inventare prodotti nel catalogo.`,
+
+  durations: `Sei un esperto di conservazione degli alimenti in una casa italiana.
+Ricevi una lista numerata di prodotti alimentari (nome, categoria, unita').
+Per ciascuno indica quanto dura DA QUANDO ENTRA IN CASA (confezione integra, come si compra di solito al supermercato):
+Rispondi SOLO con JSON valido:
+{ "items": [{"n": number, "pantry_days": number|null, "fridge_days": number|null, "freezer_months": number|null, "open_days": number|null, "uses_per_pack": number|null}] }
+Regole:
+- pantry_days = giorni a temperatura ambiente (dispensa); null se NON si conserva fuori frigo (latte fresco, carne, pesce, formaggi freschi, verdura a foglia...).
+- fridge_days = giorni in frigo; null se in frigo non ha senso (pasta secca, farina, zucchero, scatolame chiuso, spezie).
+- freezer_months = mesi in freezer; null se non si congela bene (uova intere, insalata, latte UHT, pasta secca, scatolame).
+- open_days = giorni dopo l'apertura della confezione (in frigo se serve); null se non cambia (spezie, sale, pasta secca).
+- uses_per_pack solo se l'unita' e' "conf" e il prodotto si usa a dosi tipiche (dado 10, bustine lievito 3, vasetto pesto 3, panna 2...), altrimenti null.
+- Valori prudenti, numeri interi, un elemento per ogni prodotto con lo stesso "n". Non inventare prodotti.`,
 } as const;
 
 export type ExtractKind = keyof typeof PROMPTS;

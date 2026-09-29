@@ -8,6 +8,7 @@ export const TABLES: Record<string, string[]> = {
   products: [
     'id', 'name', 'area', 'category_id', 'default_unit', 'default_location_id', 'favorite', 'essential',
     'min_stock', 'open_shelf_days', 'freezer_max_months', 'diet_tags', 'alternatives', 'notes',
+    'pantry_days', 'fridge_days', 'uses_per_pack',
   ],
   receipts: ['id', 'store_id', 'date', 'total_paid', 'total_discount', 'photo_key', 'notes'],
   purchase_lines: ['id', 'receipt_id', 'product_id', 'qty', 'unit', 'price_paid', 'price_full', 'discount', 'offer_type'],
@@ -19,8 +20,8 @@ export const TABLES: Record<string, string[]> = {
   extra_expenses: ['id', 'amount', 'date', 'area', 'category', 'note'],
   budgets: ['id', 'month', 'area', 'amount'],
   recipes: [
-    'id', 'title', 'servings', 'prep_min', 'cook_min', 'rest_min', 'difficulty', 'tags', 'diet_tags',
-    'photo_key', 'source_url', 'notes', 'favorite', 'cooked_count', 'last_cooked_at',
+    'id', 'title', 'servings', 'prep_min', 'cook_min', 'rest_min', 'difficulty', 'tags', 'diet_tags', 'nutrition',
+    'photo_key', 'source_url', 'notes', 'favorite', 'cooked_count', 'last_cooked_at', 'course',
   ],
   recipe_ingredients: ['id', 'recipe_id', 'product_id', 'text', 'qty', 'unit', 'optional', 'grp', 'sort'],
   recipe_steps: ['id', 'recipe_id', 'sort', 'text', 'timer_min', 'photo_key'],
@@ -31,7 +32,7 @@ export const TABLES: Record<string, string[]> = {
 };
 const TABLE_ORDER = Object.keys(TABLES); // ordine utile per le foreign key
 
-export type Change = { table: string; row: Record<string, unknown> };
+export type Change = { table: string; row: Record<string, unknown>; op?: string | null; label?: string | null; undoes?: string | null };
 export type PushResult = { applied: number; skipped: number; rejected: number };
 
 const PAGE = 500;
@@ -58,10 +59,14 @@ export async function push(db: D1Database, changes: Change[], device: string): P
   if (!Array.isArray(changes) || changes.length === 0) return res;
   if (changes.length > MAX_PUSH) throw new Error('Troppe modifiche in un solo invio');
 
-  const clean: { table: string; row: Record<string, unknown> }[] = [];
+  const clean: { table: string; row: Record<string, unknown>; op: string | null; label: string | null }[] = [];
+  const OP = /^[A-Za-z0-9_-]{4,64}$/;
+  const undoes = [...new Set(changes.map((c) => c?.undoes).filter((x): x is string => typeof x === 'string' && OP.test(x)))];
   for (const ch of changes) {
     const row = cleanRow(ch?.table, ch?.row);
-    if (row) clean.push({ table: ch.table, row });
+    const op = typeof ch?.op === 'string' && OP.test(ch.op) ? ch.op : null;
+    const label = typeof ch?.label === 'string' ? ch.label.slice(0, 120) : null;
+    if (row) clean.push({ table: ch.table, row, op, label });
     else res.rejected++;
   }
   clean.sort((a, b) => TABLE_ORDER.indexOf(a.table) - TABLE_ORDER.indexOf(b.table));
@@ -86,6 +91,7 @@ export async function push(db: D1Database, changes: Change[], device: string): P
     if (!ok) res.skipped++;
     return ok;
   });
+  if (undoes.length) await db.prepare(`UPDATE change_log SET undone = 1 WHERE op_id IN (${undoes.map(() => '?').join(',')})`).bind(...undoes).run();
   if (winners.length === 0) return res;
 
   // Riserva un blocco di rev in modo atomico.
@@ -97,7 +103,7 @@ export async function push(db: D1Database, changes: Change[], device: string): P
 
   const now = Date.now();
   const pairs: D1PreparedStatement[][] = [];
-  for (const { table, row } of winners) {
+  for (const { table, row, op, label } of winners) {
     const stmts: D1PreparedStatement[] = [];
     pairs.push(stmts);
     rev++;
@@ -116,9 +122,9 @@ export async function push(db: D1Database, changes: Change[], device: string): P
     stmts.push(
       db
         .prepare(
-          'INSERT INTO change_log (id, table_name, row_id, before_json, after_json, device, at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+          'INSERT INTO change_log (id, table_name, row_id, before_json, after_json, device, at, op_id, label) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )
-        .bind(crypto.randomUUID(), table, row.id as string, before ? JSON.stringify(before) : null, JSON.stringify(row), device, now)
+        .bind(crypto.randomUUID(), table, row.id as string, before ? JSON.stringify(before) : null, JSON.stringify(row), device, now, op, label)
     );
   }
   try {
@@ -160,4 +166,54 @@ export async function pull(db: D1Database, since: number) {
   }
   const cursor = page.length ? page[page.length - 1].rev : since;
   return { changes: page.map(({ table, row }) => ({ table, row })), cursor, more };
+}
+
+// ── Annulla da qualsiasi dispositivo ──
+// Operazioni recenti (gruppi di modifiche con la stessa etichetta), da tutti i dispositivi.
+export async function recentOps(db: D1Database, limit: number) {
+  const { results } = await db
+    .prepare(
+      `SELECT op_id, MAX(label) AS label, MAX(device) AS device, MIN(at) AS at, COUNT(*) AS n, MAX(undone) AS undone
+       FROM change_log WHERE op_id IS NOT NULL AND label IS NOT NULL
+       GROUP BY op_id ORDER BY MIN(at) DESC LIMIT ?`
+    )
+    .bind(limit)
+    .all();
+  return results;
+}
+
+// Ripristina lo stato "prima" di un'operazione. Righe modificate dopo (da altre operazioni) = conflitti:
+// senza force non si tocca niente e si restituiscono.
+export async function undoOp(db: D1Database, opId: string, device: string, force = false) {
+  const { results } = await db
+    .prepare('SELECT table_name, row_id, before_json, after_json, label, undone FROM change_log WHERE op_id = ? ORDER BY at, rowid')
+    .bind(opId)
+    .all<{ table_name: string; row_id: string; before_json: string | null; after_json: string; label: string | null; undone: number }>();
+  if (!results.length) return { error: 'Operazione non trovata' as const };
+  if (results.some((r) => r.undone)) return { error: 'Già annullata' as const };
+  // per riga: il "prima" della prima modifica, il "dopo" dell'ultima
+  const rows = new Map<string, { table: string; id: string; before: any; after: any }>();
+  for (const r of results) {
+    const k = `${r.table_name}:${r.row_id}`;
+    const cur = rows.get(k);
+    if (cur) cur.after = JSON.parse(r.after_json);
+    else rows.set(k, { table: r.table_name, id: r.row_id, before: r.before_json ? JSON.parse(r.before_json) : null, after: JSON.parse(r.after_json) });
+  }
+  const conflicts: string[] = [];
+  const changes: Change[] = [];
+  const label = `Annullato: ${results.find((r) => r.label)?.label || 'operazione'}`.slice(0, 120);
+  const newOp = `undo-${crypto.randomUUID().slice(0, 18)}`;
+  let t = Date.now();
+  for (const x of rows.values()) {
+    if (!TABLES[x.table]) continue;
+    const now = await db.prepare(`SELECT * FROM ${x.table} WHERE id = ?`).bind(x.id).first<Record<string, unknown>>();
+    if (now && Number(now.updated_at) !== Number(x.after.updated_at)) conflicts.push(`${x.table}:${x.id}`);
+    const base = x.before ? { ...x.before } : { ...(now || x.after), deleted: 1 };
+    const stamp = Math.max(t++, Number(now?.updated_at ?? 0) + 1);
+    changes.push({ table: x.table, row: { ...base, updated_at: stamp }, op: newOp, label });
+  }
+  if (conflicts.length && !force) return { conflicts };
+  const res = await push(db, changes, device);
+  await db.prepare('UPDATE change_log SET undone = 1 WHERE op_id = ?').bind(opId).run();
+  return { ok: true, applied: res.applied, conflicts };
 }

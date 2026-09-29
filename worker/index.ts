@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { push, pull, type Change } from './sync';
+import { push, pull, recentOps, undoOp, type Change } from './sync';
 import { extract } from './ai';
 import { fetchPage, recipeFromHtml, htmlToText, fetchImageToFiles, MAX_FILE } from './importer';
 import { getVapid, sendPush, type PushMsg, type Sub } from './webpush';
@@ -146,6 +146,64 @@ app.post('/ai/receipt', async (c) => {
   }
 });
 
+// Abbinamento ingredienti -> catalogo (proposte; Andrea conferma nella schermata "Collega ingredienti").
+app.post('/ai/match', async (c) => {
+  const body = await c.req.json<{ items?: string[]; catalog?: string[]; categories?: { id: string; name: string }[] }>().catch(() => null);
+  const items = (body?.items || []).map((s) => String(s).slice(0, 120)).slice(0, 40);
+  if (!items.length) return c.json({ error: 'Nessun ingrediente' }, 400);
+  const catalog = (body?.catalog || []).map((s) => String(s).slice(0, 80)).slice(0, 1500);
+  const cats = (body?.categories || []).slice(0, 60).map((x) => `${String(x.id).slice(0, 40)}: ${String(x.name).slice(0, 60)}`);
+  const extra = [`Catalogo: ${catalog.join(' | ') || '(vuoto)'}`, `Categorie: ${cats.join(' | ')}`].join('\n');
+  const text = `Ingredienti:\n${items.map((t, n) => `${n + 1}. ${t}`).join('\n')}`;
+  try {
+    const { model, data } = await extract(c.env, 'match', { text, extra });
+    const raw = Array.isArray((data as any)?.items) ? (data as any).items : [];
+    // normalizza: n 1-based -> indice 0-based, un risultato per ingrediente
+    const out = items.map((t, i) => {
+      const r = raw.find((x: any) => Number(x?.n) === i + 1) || raw[i] || {};
+      return {
+        text: t,
+        catalog: typeof r.catalog === 'string' && r.catalog.trim() ? r.catalog.trim() : null,
+        new: r.new && typeof r.new.name === 'string' && r.new.name.trim() ? { name: r.new.name.trim(), category_id: String(r.new.category_id || ''), unit: String(r.new.unit || ''), location: String(r.new.location || '') } : null,
+        skip: !!r.skip,
+      };
+    });
+    return c.json({ model, items: out });
+  } catch (e) {
+    return c.json({ error: `AI: ${(e as Error).message}` }, 502);
+  }
+});
+
+// Durate di conservazione proposte (dispensa / frigo / freezer / da aperto / usi per confezione).
+app.post('/ai/durations', async (c) => {
+  const body = await c.req.json<{ items?: { name?: string; category?: string; unit?: string }[] }>().catch(() => null);
+  const items = (body?.items || []).slice(0, 40).map((x) => ({ name: String(x?.name || '').slice(0, 80), category: String(x?.category || '').slice(0, 60), unit: String(x?.unit || '').slice(0, 10) }));
+  if (!items.length || items.some((x) => !x.name)) return c.json({ error: 'Nessun prodotto' }, 400);
+  const text = `Prodotti:\n${items.map((x, n) => `${n + 1}. ${x.name} (${x.category || '—'}, ${x.unit || '—'})`).join('\n')}`;
+  const int = (v: unknown, max: number) => {
+    const n = Number(v);
+    return v == null || v === '' || !Number.isFinite(n) || n <= 0 ? null : Math.min(Math.round(n), max);
+  };
+  try {
+    const { model, data } = await extract(c.env, 'durations', { text });
+    const raw = Array.isArray((data as any)?.items) ? (data as any).items : [];
+    const out = items.map((x, i) => {
+      const r = raw.find((y: any) => Number(y?.n) === i + 1) || raw[i] || {};
+      return {
+        name: x.name,
+        pantry_days: int(r.pantry_days, 3650),
+        fridge_days: int(r.fridge_days, 365),
+        freezer_months: int(r.freezer_months, 24),
+        open_days: int(r.open_days, 730),
+        uses_per_pack: x.unit === 'conf' ? int(r.uses_per_pack, 100) : null,
+      };
+    });
+    return c.json({ model, items: out });
+  } catch (e) {
+    return c.json({ error: `AI: ${(e as Error).message}` }, 502);
+  }
+});
+
 // ── Notifiche push ──
 async function subId(endpoint: string) {
   const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(endpoint));
@@ -255,6 +313,20 @@ app.get('/history', async (c) => {
     .bind(limit)
     .all();
   return c.json({ items: results });
+});
+
+// Operazioni recenti di tutti i dispositivi + annulla.
+app.get('/ops', async (c) => {
+  const limit = Math.min(Number(c.req.query('limit')) || 40, 200);
+  return c.json({ items: await recentOps(c.env.DB, limit) });
+});
+app.post('/undo', async (c) => {
+  const b = await c.req.json<{ op?: string; force?: boolean; device?: string }>().catch(() => null);
+  if (!b?.op) return c.json({ error: 'Operazione mancante' }, 400);
+  const r = await undoOp(c.env.DB, String(b.op), String(b.device ?? 'sconosciuto').slice(0, 60), !!b.force);
+  if ('error' in r) return c.json({ error: r.error }, 404);
+  if (!('ok' in r)) return c.json({ conflicts: r.conflicts }, 409);
+  return c.json(r);
 });
 
 app.notFound((c) => c.json({ error: 'Endpoint non trovato' }, 404));

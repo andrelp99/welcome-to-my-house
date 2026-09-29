@@ -5,10 +5,13 @@ import { useData, useRecipes, showToast } from '../hooks/useData.js';
 import { Button, IconButton, Stepper, Empty } from '../components/ui/kit.jsx';
 import { Photo, IngredientList, CookedModal, LinkModal } from '../components/recipes.jsx';
 import { ProductForm } from '../components/forms.jsx';
-import { recipeStatus, addMissingToList, recipeToText, parseList, joinList, suggestDiet } from '../db/recipes.js';
+import { recipeStatus, addMissingToList, recipeToText, parseList, joinList, suggestDiet, NO_PRODUCT } from '../db/recipes.js';
 import { fmtQty } from '../db/logic.js';
 import { put, save, undo } from '../db/repo.js';
 import { StatusChip } from './Ricette.jsx';
+import { autoTags, cleanTags } from '../db/tags.js';
+import { expiringSet, urgentOf, recipeCost, nutritionOf, NUTRI_LABELS } from '../db/insights.js';
+import { euro } from '../db/logic.js';
 
 export default function RicettaDettaglio() {
   const { id } = useParams();
@@ -24,7 +27,7 @@ export default function RicettaDettaglio() {
   const planId = params.get('piano');
 
   useEffect(() => {
-    if (recipe && servings == null) setServings(Number(params.get('porzioni')) || recipe.servings || 1);
+    if (recipe && servings == null) setServings(Number(params.get('porzioni')) || 1);
   }, [recipe, servings, params]);
   useEffect(() => {
     if (params.get('cucinato') && recipe) {
@@ -36,14 +39,19 @@ export default function RicettaDettaglio() {
 
   const ings = rec?.ings[id] || [];
   const steps = rec?.steps[id] || [];
-  const scale = recipe ? (servings || recipe.servings) / (recipe.servings || 1) : 1;
+  const scale = recipe ? (servings || 1) / (recipe.servings || 1) : 1;
   const status = useMemo(() => (data && rec ? recipeStatus(ings, scale, data, rec.subs) : null), [data, rec, ings, scale]);
 
   if (!data || !rec) return null;
   if (!recipe) return <Empty icon={ChefHat}>Ricetta non trovata. <Link to="/ricette" className="text-brand">Torna al ricettario</Link></Empty>;
 
   const diet = parseList(recipe.diet_tags);
-  const tags = parseList(recipe.tags);
+  const tags = cleanTags(recipe.tags, recipe.title);
+  const auto = autoTags(recipe, ings, steps);
+  const urgent = urgentOf(ings, expiringSet(data), data);
+  const cost = recipeCost(ings, scale, data);
+  const nutri = nutritionOf(recipe);
+  const portions = servings || 1;
   const suggested = suggestDiet(recipe, ings, data).filter((t) => !diet.includes(t));
   const toBuy = status.rows.filter(({ ing, st }) => !ing.optional && !st.sub && (st.level === 'missing' || st.level === 'low')).length;
 
@@ -112,11 +120,13 @@ export default function RicettaDettaglio() {
             {recipe.prep_min ? <Meta icon={Clock}>prep {recipe.prep_min}′</Meta> : null}
             {recipe.cook_min ? <Meta icon={Flame}>cottura {recipe.cook_min}′</Meta> : null}
             {recipe.rest_min ? <Meta icon={Hourglass}>riposo {recipe.rest_min}′</Meta> : null}
-            {recipe.difficulty ? <Meta icon={Gauge}>{recipe.difficulty}</Meta> : null}
             {recipe.cooked_count ? <Meta icon={ChefHat}>cucinata {recipe.cooked_count}× · ultima {new Date(recipe.last_cooked_at).toLocaleDateString('it-IT')}</Meta> : null}
           </div>
           <div className="flex flex-wrap gap-1.5">
             <span className="print:hidden"><StatusChip st={status} /></span>
+            {auto.course && <AutoTag label="portata" auto={auto.course.auto}>{auto.course.value}</AutoTag>}
+            {auto.time && <AutoTag label="tempo totale" icon={Clock}>{auto.time}</AutoTag>}
+            {auto.difficulty && <AutoTag label="difficoltà" icon={Gauge} auto={auto.difficulty.auto}>{auto.difficulty.value}</AutoTag>}
             {diet.map((t) => (
               <span key={t} className="rounded-full border border-brand/50 text-brand px-2 py-0.5 text-xs">{t}</span>
             ))}
@@ -150,11 +160,46 @@ export default function RicettaDettaglio() {
           <div className="flex items-center justify-between gap-2 mb-2">
             <h2 className="font-bold">Ingredienti</h2>
             <div className="print:hidden">
-              <Stepper value={servings || recipe.servings} unit="porz." min={1} onChange={(v) => setServings(Math.max(1, v))} />
+              <Stepper value={servings || 1} unit="porz." min={1} onChange={(v) => setServings(Math.max(1, v))} />
             </div>
-            <span className="hidden print:inline text-sm">{fmtQty(servings || recipe.servings)} porzioni</span>
+            <span className="hidden print:inline text-sm">{fmtQty(servings || 1)} porzioni</span>
           </div>
+          {urgent.length > 0 && (
+            <p className="mb-2 rounded-md bg-warning/10 border border-warning/40 px-3 py-2 text-sm text-warning">Usa prima: {urgent.join(', ')} (in scadenza).</p>
+          )}
           {ings.length ? <IngredientList rows={status.rows} scale={scale} onLink={setLinking} /> : <p className="text-sm text-text-muted">Nessun ingrediente.</p>}
+          {(cost.known > 0 || cost.unknown.length > 0) && (
+            <div className="mt-3 pt-3 border-t border-bg-border text-sm">
+              <div className="flex justify-between gap-2">
+                <span className="text-text-secondary">Costo stimato</span>
+                <span className="font-semibold tabular-nums">
+                  {cost.known ? `${euro(cost.total / portions)} / porz.` : '—'}
+                  {portions > 1 && cost.known ? <span className="text-text-muted font-normal"> · {euro(cost.total)} tot.</span> : null}
+                </span>
+              </div>
+              <p className="text-xs text-text-muted">
+                Dall'ultimo prezzo pagato{cost.unknown.length ? `; senza prezzo: ${cost.unknown.join(', ')}` : ''}. Esclusi i “q.b.”.
+              </p>
+            </div>
+          )}
+          {nutri && (
+            <div className="mt-3 pt-3 border-t border-bg-border">
+              <div className="flex justify-between text-sm mb-1">
+                <span className="font-semibold">Valori nutrizionali</span>
+                <span className="text-text-muted text-xs">per porzione{portions > 1 ? ` · ×${fmtQty(portions)}` : ''}</span>
+              </div>
+              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 text-sm">
+                {NUTRI_LABELS.filter(([k]) => nutri[k] != null).map(([k, label, u]) => (
+                  <div key={k} className={`flex justify-between py-0.5 ${label.startsWith('di cui') ? 'text-text-muted text-xs pl-2' : ''}`}>
+                    <dt>{label}</dt>
+                    <dd className="tabular-nums">
+                      {fmtQty(Math.round(nutri[k] * (k === 'kcal' ? 1 : 10)) / (k === 'kcal' ? 1 : 10))} {u}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          )}
         </section>
 
         <section className="rounded-lg border border-bg-border bg-bg-surface p-4 shadow-card">
@@ -193,13 +238,14 @@ export default function RicettaDettaglio() {
         </section>
       )}
 
-      {cooked && <CookedModal recipe={recipe} status={status} servings={servings || recipe.servings} data={data} onClose={(ok) => { setCooked(false); if (ok && planId) put('meal_plan', { id: planId, done: 1 }); }} />}
+      {cooked && <CookedModal recipe={recipe} status={status} servings={servings || 1} data={data} onClose={(ok) => { setCooked(false); if (ok && planId) put('meal_plan', { id: planId, done: 1 }); }} />}
       {linking && (
         <LinkModal
           ing={linking}
           data={data}
           onClose={() => setLinking(null)}
           onPick={(p) => link(linking, p)}
+          onSkip={() => link(linking, { id: NO_PRODUCT, name: 'non serve' })}
           onCreate={(name) => setCreating({ ing: linking, name })}
         />
       )}
@@ -220,6 +266,17 @@ function Meta({ icon: Icon, children }) {
   return (
     <span className="inline-flex items-center gap-1">
       <Icon size={14} /> {children}
+    </span>
+  );
+}
+
+// Tag automatico (portata, tempo, difficolta'): "~" se dedotto e non scelto a mano.
+function AutoTag({ children, icon: Icon, auto, label }) {
+  return (
+    <span title={auto ? `${label} (automatica: cambiala in Modifica)` : label} className="inline-flex items-center gap-1 rounded-full bg-bg-elevated border border-bg-border px-2 py-0.5 text-xs font-medium">
+      {Icon ? <Icon size={12} /> : null}
+      {children}
+      {auto ? <span className="text-text-muted">~</span> : null}
     </span>
   );
 }

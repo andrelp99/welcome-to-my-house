@@ -5,14 +5,15 @@ import { useData, useRecipes, showToast } from '../hooks/useData.js';
 import { Button, IconButton, Field, Input, Select, Modal, Toggle } from '../components/ui/kit.jsx';
 import { PhotoPicker, LinkModal } from '../components/recipes.jsx';
 import { ProductForm } from '../components/forms.jsx';
-import { parseIngredientLine, matchProduct, RECIPE_UNITS, DIET_TAGS, DIFFICULTY, parseList, joinList, detectTimer, suggestDiet } from '../db/recipes.js';
+import { autoTags, cleanTags, courseOf, COURSES } from '../db/tags.js';
+import { parseIngredientLine, autoLink, learnedLinks, NO_PRODUCT, RECIPE_UNITS, DIET_TAGS, DIFFICULTY, parseList, joinList, detectTimer, suggestDiet } from '../db/recipes.js';
 import { save } from '../db/repo.js';
 import { uuid } from '../db/db.js';
 
 const num = (v) => (v === '' || v == null ? null : Number(String(v).replace(',', '.')));
 const txtArea = 'w-full rounded-md bg-bg-elevated border border-bg-border px-3 py-2.5 text-text-primary placeholder:text-text-muted focus:outline-none focus:border-brand';
 
-const EMPTY = { title: '', servings: 1, prep_min: '', cook_min: '', rest_min: '', difficulty: '', tags: '', diet_tags: '', photo_key: null, source_url: '', notes: '', favorite: 0 };
+const EMPTY = { title: '', servings: 1, prep_min: '', cook_min: '', rest_min: '', difficulty: '', course: '', tags: '', diet_tags: '', photo_key: null, source_url: '', notes: '', favorite: 0 };
 
 export default function RicettaForm() {
   const { id } = useParams();
@@ -35,12 +36,12 @@ export default function RicettaForm() {
     if (id) {
       const r = rec.byId[id];
       if (!r) return;
-      setF({ ...EMPTY, ...r, prep_min: r.prep_min ?? '', cook_min: r.cook_min ?? '', rest_min: r.rest_min ?? '' });
+      setF({ ...EMPTY, ...r, prep_min: r.prep_min ?? '', cook_min: r.cook_min ?? '', rest_min: r.rest_min ?? '', course: courseOf(r)?.value || '', tags: cleanTags(r.tags, r.title).join(', ') });
       setIngs((rec.ings[id] || []).map((i) => ({ ...i })));
       setSteps((rec.steps[id] || []).map((s) => ({ ...s })));
     } else if (draft && data) {
       setF({ ...EMPTY, ...draft, prep_min: draft.prep_min ?? '', cook_min: draft.cook_min ?? '', rest_min: draft.rest_min ?? '', tags: draft.tags || '', notes: draft.notes || '', source_url: draft.source_url || '' });
-      setIngs((draft.ingredients || []).map((i) => ({ id: uuid(), text: i.text, qty: i.qty ?? null, unit: i.unit || '', product_id: matchProduct(i.text, data.products)?.id || null, optional: i.optional ? 1 : 0, grp: i.grp || null })));
+      setIngs((draft.ingredients || []).map((i) => ({ id: uuid(), text: i.text, qty: i.qty ?? null, unit: i.unit || '', product_id: autoLink(i.text, data.products, rec && learnedLinks(rec.ings, data.products)), optional: i.optional ? 1 : 0, grp: i.grp || null })));
       setSteps((draft.steps || []).map((s) => ({ id: uuid(), text: s.text, timer_min: s.timer_min ?? null, photo_key: s.photo_key || null })));
     } else if (!draft) setF({ ...EMPTY });
   }, [id, rec, f, draft, data]);
@@ -48,10 +49,10 @@ export default function RicettaForm() {
   if (!data || !rec || !f) return null;
   const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
   const diet = parseList(f.diet_tags);
+  const autoT = autoTags({ ...f, course: '', difficulty: '', prep_min: num(f.prep_min), cook_min: num(f.cook_min), rest_min: num(f.rest_min) }, ings, steps);
 
   function makeIng(parsed) {
-    const p = matchProduct(parsed.text, data.products);
-    return { id: uuid(), text: parsed.text, qty: parsed.qty, unit: parsed.unit || '', product_id: p?.id || null, optional: 0, grp: null, _new: true };
+    return { id: uuid(), text: parsed.text, qty: parsed.qty, unit: parsed.unit || '', product_id: autoLink(parsed.text, data.products, learnedLinks(rec.ings, data.products)), optional: 0, grp: null, _new: true };
   }
   function addLine() {
     const parsed = parseIngredientLine(newIng);
@@ -106,6 +107,7 @@ export default function RicettaForm() {
       cook_min: num(f.cook_min),
       rest_min: num(f.rest_min),
       difficulty: f.difficulty || null,
+      course: f.course || null,
       tags: joinList(parseList(f.tags)) || null,
       diet_tags: joinList(diet) || null,
       photo_key: f.photo_key || null,
@@ -165,7 +167,7 @@ export default function RicettaForm() {
           <PhotoPicker value={f.photo_key} onChange={set('photo_key')} />
         </Field>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <Field label="Porzioni">
+          <Field label="Dosi per (porz.)">
             <Input inputMode="decimal" value={f.servings} onChange={(e) => set('servings')(e.target.value)} />
           </Field>
           <Field label="Prep. (min)">
@@ -179,15 +181,25 @@ export default function RicettaForm() {
           </Field>
         </div>
         <div className="grid grid-cols-2 gap-3">
+          <Field label="Portata">
+            <Select value={f.course || ''} onChange={(e) => set('course')(e.target.value)}>
+              <option value="">auto{autoT.course ? ` (${autoT.course.value})` : ''}</option>
+              {COURSES.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </Select>
+          </Field>
           <Field label="Difficoltà">
             <Select value={f.difficulty || ''} onChange={(e) => set('difficulty')(e.target.value)}>
-              <option value="">—</option>
+              <option value="">auto{autoT.difficulty ? ` (${autoT.difficulty.value})` : ''}</option>
               {DIFFICULTY.map((d) => (
                 <option key={d} value={d}>{d}</option>
               ))}
             </Select>
           </Field>
-          <Field label="Tag" hint="separati da virgola">
+        </div>
+        <div>
+          <Field label="Altri tag" hint="separati da virgola · portata, tempo e difficoltà sono automatici">
             <Input value={f.tags || ''} onChange={(e) => set('tags')(e.target.value)} placeholder="primo, pasta" />
           </Field>
         </div>
@@ -247,7 +259,7 @@ export default function RicettaForm() {
                     ))}
                   </Select>
                   <button type="button" onClick={() => setLinking({ ing: i, n })} className={`inline-flex items-center gap-1 text-sm truncate ${p ? 'text-positive' : 'text-text-muted'}`}>
-                    <Link2 size={14} className="shrink-0" /> <span className="truncate">{p ? p.name : 'collega'}</span>
+                    <Link2 size={14} className="shrink-0" /> <span className="truncate">{p ? p.name : i.product_id === NO_PRODUCT ? 'non serve' : 'collega'}</span>
                   </button>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
@@ -348,6 +360,10 @@ export default function RicettaForm() {
           onClose={() => setLinking(null)}
           onPick={(p) => {
             upd(setIngs, linking.n, { product_id: p.id });
+            setLinking(null);
+          }}
+          onSkip={() => {
+            upd(setIngs, linking.n, { product_id: NO_PRODUCT });
             setLinking(null);
           }}
           onCreate={(name) => setCreating({ ...linking, name })}

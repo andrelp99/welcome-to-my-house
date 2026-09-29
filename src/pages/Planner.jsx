@@ -11,6 +11,7 @@ import { recipeStatus } from '../db/recipes.js';
 import { recipeSeason } from '../db/season.js';
 import { fmtQty } from '../db/logic.js';
 import { put, remove, undo } from '../db/repo.js';
+import { expiringSet, urgentOf } from '../db/insights.js';
 import { fmtAmount } from '../db/recipes.js';
 
 export default function Planner() {
@@ -40,7 +41,7 @@ export default function Planner() {
     const out = {};
     for (const e of entries) {
       const r = e.recipe_id && rec.byId[e.recipe_id];
-      if (r) out[e.id] = recipeStatus(rec.ings[r.id] || [], (Number(e.servings) || r.servings) / (r.servings || 1), data, rec.subs);
+      if (r) out[e.id] = recipeStatus(rec.ings[r.id] || [], (Number(e.servings) || 1) / (r.servings || 1), data, rec.subs);
     }
     return out;
   }, [entries, data, rec]);
@@ -156,20 +157,22 @@ function AddMeal({ slot, data, rec, onClose }) {
   const [servings, setServings] = useState(1);
   const [note, setNote] = useState('');
   const month = Number(slot.date.slice(5, 7));
+  const exp = useMemo(() => expiringSet(data), [data]);
   const rows = useMemo(
     () =>
       rec.list.map((r) => ({
         r,
-        st: recipeStatus(rec.ings[r.id] || [], 1, data, rec.subs),
+        st: recipeStatus(rec.ings[r.id] || [], 1 / (r.servings || 1), data, rec.subs),
         season: recipeSeason(rec.ings[r.id] || [], month).seasonal,
+        urgent: urgentOf(rec.ings[r.id] || [], exp, data).length,
       })),
-    [rec, data, month]
+    [rec, data, month, exp]
   );
   const s = q.trim().toLowerCase();
   const list = rows
     .filter(({ r, st, season }) => (tab === 'ok' ? st.feasible : tab === 'season' ? season : tab === 'fav' ? r.favorite : true))
     .filter(({ r }) => !s || r.title.toLowerCase().includes(s))
-    .sort((a, b) => (a.r.last_cooked_at || '').localeCompare(b.r.last_cooked_at || ''));
+    .sort((a, b) => b.urgent - a.urgent || (a.r.last_cooked_at || '').localeCompare(b.r.last_cooked_at || ''));
 
   async function add(recipe) {
     await put('meal_plan', { date: slot.date, meal: slot.meal, recipe_id: recipe?.id || null, servings: recipe ? servings : 1, note: recipe ? null : note.trim(), done: 0 }, `Planner: ${recipe?.title || note}`);
@@ -223,15 +226,16 @@ function AddMeal({ slot, data, rec, onClose }) {
                 <Empty icon={tab === 'season' ? Leaf : ChefHat}>{tab === 'ok' ? 'Nessuna ricetta fattibile ora: prova “Tutte”.' : 'Nessuna ricetta.'}</Empty>
               ) : (
                 <ul className="divide-y divide-bg-border max-h-[50vh] overflow-y-auto">
-                  {list.map(({ r, st, season }) => (
+                  {list.map(({ r, st, season, urgent }) => (
                     <li key={r.id}>
-                      <button type="button" className="w-full flex items-center gap-3 py-2 text-left" onClick={() => { setPick(r); setServings(r.servings || 1); }}>
+                      <button type="button" className="w-full flex items-center gap-3 py-2 text-left" onClick={() => { setPick(r); setServings(1); }}>
                         <Photo id={r.photo_key} className="w-12 h-12 rounded-md shrink-0" />
                         <span className="flex-1 min-w-0">
                           <span className="block truncate font-medium">{r.title}</span>
                           <span className="flex items-center gap-2">
                             <StatusChip st={st} />
                             {season && <Leaf size={14} className="text-positive" aria-label="di stagione" />}
+                            {urgent > 0 && <span className="text-warning text-xs">usa {urgent} in scadenza</span>}
                           </span>
                         </span>
                       </button>

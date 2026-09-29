@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { ChefHat, Camera, ImagePlus, X, Check, AlertTriangle, XCircle, HelpCircle, Repeat, Trash2, Plus } from 'lucide-react';
+import { ChefHat, Camera, ImagePlus, X, Check, AlertTriangle, XCircle, HelpCircle, Repeat, Trash2, Plus, MinusCircle, Ban } from 'lucide-react';
 import { usePhoto, addPhoto } from '../db/photos.js';
 import { Modal, Field, Input, Select, Button, IconButton, Stepper, ProductPicker, Empty } from './ui/kit.jsx';
 import { fmtAmount, cookRecipe, proposedUses } from '../db/recipes.js';
@@ -58,9 +58,10 @@ export function PhotoPicker({ value, onChange, compact = false }) {
 
 export const STATUS_UI = {
   ok: { icon: Check, cls: 'text-positive', label: 'ho' },
-  low: { icon: AlertTriangle, cls: 'text-warning', label: 'poco' },
+  low: { icon: AlertTriangle, cls: 'text-negative', label: 'poco' },
   missing: { icon: XCircle, cls: 'text-negative', label: 'manca' },
   unlinked: { icon: HelpCircle, cls: 'text-text-muted', label: 'non collegato' },
+  free: { icon: MinusCircle, cls: 'text-text-muted', label: 'non serve' },
 };
 
 // Lista ingredienti con stato dispensa, raggruppata per "grp".
@@ -72,7 +73,8 @@ export function IngredientList({ rows, scale, onLink }) {
       grp = ing.grp || null;
       if (grp) out.push(<li key={`g-${ing.id}`} className="pt-3 pb-1 text-xs uppercase tracking-wider font-semibold text-text-muted">{grp}</li>);
     }
-    const ui = st.sub ? { icon: Repeat, cls: 'text-brand', label: 'sostituto' } : STATUS_UI[st.level];
+    const ui = st.sub ? { icon: Repeat, cls: 'text-warning', label: 'sostituto' } : STATUS_UI[st.level];
+    const nameCls = st.sub ? 'text-warning' : st.level === 'ok' ? 'text-positive' : st.level === 'missing' || st.level === 'low' ? 'text-negative' : '';
     const Icon = ui.icon;
     const amount = ing.qty != null || ing.unit ? fmtAmount(ing.qty != null ? ing.qty * scale : null, ing.unit) : '';
     out.push(
@@ -80,14 +82,16 @@ export function IngredientList({ rows, scale, onLink }) {
         <Icon size={18} className={`mt-0.5 shrink-0 ${ui.cls}`} aria-label={ui.label} />
         <div className="flex-1 min-w-0">
           <div className="flex justify-between gap-2">
-            <span className={ing.optional ? 'text-text-secondary' : ''}>
+            <span className={`${nameCls} ${ing.optional ? 'opacity-70' : ''}`}>
               {ing.text}
               {ing.optional ? <span className="text-text-muted text-xs"> · facoltativo</span> : null}
             </span>
             <span className="font-semibold tabular-nums shrink-0">{amount}</span>
           </div>
           <div className="text-xs text-text-muted">
-            {st.level === 'unlinked' ? (
+            {st.level === 'free' ? (
+              'non serve in dispensa'
+            ) : st.level === 'unlinked' ? (
               onLink ? (
                 <button type="button" className="text-brand font-semibold print:hidden" onClick={() => onLink(ing)}>Collega al catalogo</button>
               ) : null
@@ -170,11 +174,16 @@ export function CookedModal({ recipe, status, servings, data, onClose }) {
 }
 
 // Modale per collegare un ingrediente a un prodotto del catalogo.
-export function LinkModal({ ing, data, onPick, onCreate, onClose }) {
+export function LinkModal({ ing, data, onPick, onCreate, onSkip, onClose }) {
   return (
     <Modal title={`Collega “${ing.text}”`} onClose={onClose}>
       <ProductPicker products={data.products} area="cibo" onPick={onPick} onCreate={onCreate} placeholder="Cerca nel catalogo…" autoFocus />
       <p className="text-xs text-text-muted">Collegato al catalogo, l'ingrediente viene confrontato con la dispensa e può finire in lista spesa.</p>
+      {onSkip && (
+        <Button variant="ghost" onClick={onSkip}>
+          <Ban size={16} /> Non serve in dispensa (acqua, ghiaccio…)
+        </Button>
+      )}
     </Modal>
   );
 }

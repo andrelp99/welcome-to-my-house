@@ -1,6 +1,6 @@
 import { addDays, format, startOfWeek, parseISO } from 'date-fns';
 import { save } from './repo.js';
-import { convert, stockIn, niceQty, normUnit } from './recipes.js';
+import { stockIn, niceQty, normUnit, toProductUnit } from './recipes.js';
 
 export const MEALS = [
   { id: 'pranzo', label: 'Pranzo' },
@@ -17,14 +17,14 @@ export function planNeeds(entries, rec, data) {
   for (const e of entries) {
     const r = e.recipe_id && rec.byId[e.recipe_id];
     if (!r) continue;
-    const scale = (Number(e.servings) || r.servings || 1) / (r.servings || 1);
+    const scale = (Number(e.servings) || 1) / (r.servings || 1);
     for (const ing of rec.ings[r.id] || []) {
       if (ing.optional || !ing.product_id) continue;
       const p = data.products[ing.product_id];
       if (!p) continue;
       const cur = need.get(p.id) || { product: p, qty: 0, vague: false, recipes: new Set() };
       const vague = ing.qty == null || normUnit(ing.unit) === 'q.b.';
-      const q = vague ? null : convert(ing.qty * scale, ing.unit, p.default_unit);
+      const q = vague ? null : toProductUnit(ing.qty * scale, ing.unit, p);
       if (q == null) cur.vague = true;
       else cur.qty += q;
       cur.recipes.add(r.title);

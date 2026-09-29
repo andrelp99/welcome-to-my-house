@@ -12,7 +12,7 @@ Gira interamente sul piano gratuito Cloudflare: un solo Worker serve sia l'app (
 - Tema: scuro di default, toggle chiaro, palette giallo + rosso (token RGB in `src/index.css`)
 - Config deploy: `wrangler.jsonc` è l'unica fonte di verità (D1, AI, cron, assets)
 
-## Stato (28/09/2026)
+## Stato (29/09/2026)
 
 | Fase | Contenuto | Stato |
 |---|---|---|
@@ -21,10 +21,12 @@ Gira interamente sul piano gratuito Cloudflare: un solo Worker serve sia l'app (
 | F2 Ricettario | Ricette, stato ingredienti, sostituti, modalità cucina, "Ho cucinato", PDF | In produzione, verifica in corso |
 | F3 Import + AI | Link, share target, testo/foto, file GZ, scontrino AI | In produzione, verifica in corso |
 | F4 Smart | Planner, notifiche push, stagionalità, stima per supermercato | In produzione, verifica in corso |
-| F5 Finanze | Prospetto finanziario, sprechi, previsione esaurimento, report mensile | Scritta, da deployare |
+| F5 Finanze | Prospetto finanziario, sprechi, previsione esaurimento, report mensile | In produzione, verifica in corso |
+| Extra | Collega ingredienti (memoria + regole + AI, in blocco) | Scritta, da deployare |
+| Extra | Durate per luogo, confezioni a usi, alternative multiple, porzione 1, tag automatici, colori ingredienti | Scritta, da deployare (migrazione 0006) |
+| Extra | Durate con AI, costo per porzione, valori nutrizionali, prima ciò che scade, annulla da ogni dispositivo, foto nel backup | Scritta, da deployare (migrazione 0007) |
 
-Limiti noti: annulla solo sul dispositivo dove si è fatta la modifica; foto non incluse nel backup JSON;
-ingredienti non riconosciuti dalle regole vanno collegati a mano.
+Limiti noti: le modifiche fatte prima della 0.9 non compaiono nella cronologia condivisa.
 
 Piano completo di progetto: vedi il documento "Welcome to My House — Piano di progetto".
 
@@ -77,8 +79,8 @@ worker/ai.ts           interfaccia AI unica (ricetta, scontrino) con modello di 
 worker/importer.ts     import da link (JSON-LD schema.org) e copia foto remote in D1
 worker/webpush.ts      Web Push: VAPID ES256 + cifratura aes128gcm
 worker/digest.ts       contenuti notifiche: scadenze, riepilogo settimana, report mensile
-migrations/            schema D1: 0001_init, 0002_sync_seed, 0003_recipes, 0004_import, 0005_planner_push
-src/db/                Dexie, sync, logica dispensa, ricette, import, scontrino, planner, stagionalità, finanze, foto, push
+migrations/            schema D1: 0001_init … 0007_nutrizione_annulla
+src/db/                Dexie, sync, logica dispensa, ricette, import, collega ingredienti, scontrino, planner, stagionalità, finanze, foto, push
 src/pages/             Home, Casa/Dispensa (Inventario), Spesa, Ricette (+ dettaglio, editor, import, cucina), Planner, Finanze, Catalogo, Impostazioni
 src/components/        ui/ (kit, layout, card), forms, recipes, charts
 src/hooks/             useData, useTheme, useWakeLock
@@ -140,6 +142,16 @@ Foto in D1 (non R2): nessun bucket da creare, limite free 5 GB ampiamente suffic
 - `receipt_aliases`: riga di scontrino → prodotto, imparata a ogni conferma (migrazione `0004_import.sql`).
 - In locale `wrangler dev` usa Workers AI remoto (serve `wrangler login`).
 
+## Collega ingredienti
+
+- Pagina `/ricette/collega` (banner nel ricettario quando ci sono ingredienti senza prodotto). Logica in `src/db/linker.js`.
+- Ingredienti raggruppati per nome normalizzato ("Rosmarino fresco" = "rosmarino"), con conteggio e ricette.
+- Proposte, in ordine: **memoria** (stesso ingrediente già collegato altrove) → **regole** (`matchProduct`) → **AI** → **simile** (stesso primo termine, da verificare).
+- AI: `POST /api/ai/match` (lotti da 30) → prodotto esistente del catalogo, oppure prodotto nuovo da creare (nome, categoria, unità, luogo), oppure "non serve" (acqua, ghiaccio). Proposte AI salvate sul dispositivo (`meta.link_ai`).
+- Conferma singola (✓) o in blocco (seleziona → Conferma). Un'unica operazione: annullabile. I prodotti nuovi entrano nel catalogo.
+- "Non serve in dispensa": `product_id = 'no-product'` (non conta come da collegare, né come mancante).
+- La memoria vale anche per import e editor: un ingrediente già collegato una volta si collega da solo nelle ricette nuove.
+
 ## Smart (F4)
 
 - **Planner** (`/planner`, tabella `meal_plan`): pranzo/cena per giorno, ricetta + porzioni o nota libera. "Genera lista" somma i fabbisogni dei pasti da oggi a domenica, toglie la dispensa e i sostituti disponibili → `shopping_items` origine `planner`. "Ho cucinato" dal planner segna il pasto fatto.
@@ -160,3 +172,23 @@ Foto in D1 (non R2): nessun bucket da creare, limite free 5 GB ampiamente suffic
 - **Eventi di consumo**: il tasto − / conta rapida e "Finito" registrano `consumo` → previsione esaurimento (ritmo ultimi 60 giorni) in Home ("Finiscono presto") e in Dispensa.
 - **Report mensile push** il 1° alle 9:30 (cron esistente): speso vs budget, confronto col mese prima, risparmio, 3 affari, sprechi.
 - **Lista spesa**: modalità spesa (schermo acceso, righe grandi) e condivisione come testo.
+
+## Durate, confezioni, tag (0.8.0)
+
+- **Durate per luogo** (prodotti cibo): `pantry_days` (dispensa), `fridge_days` (frigo), `freezer_max_months` (freezer), `open_shelf_days` (da aperto). Se è impostata almeno dispensa o frigo, i luoghi senza durata non si possono scegliere (lotto, check-in, luogo abituale, "Congela"). Scadenza del lotto proposta dal luogo (`autoExpiry` in `src/db/logic.js`), sempre modificabile.
+- **Confezioni a usi**: unità `conf` + `uses_per_pack`. Le ricette scalano a usi: "2 dadi", "1 bustina", "2 uso" = usi; g/ml restano non convertibili (`toProductUnit` in `src/db/recipes.js`). Dispensa mostra "2 conf · ~20 usi", il "−" toglie 1 uso.
+- **Alternative accettate**: scelta multipla dal catalogo (salvate come nomi separati da virgola).
+- **Porzione standard 1**: dettaglio, cucina, "Ho cucinato", lista mancanti, planner e "Cosa cucino" partono da 1 porzione. `recipes.servings` = dosi della ricetta originale ("Dosi per").
+- **Tag automatici** (`src/db/tags.js`): portata (colonna `recipes.course`, se vuota dedotta da categoria GZ/titolo), tempo totale (≤15′, ≤30′, ≤1 h, >1 h), difficoltà (scritta o stimata da ingredienti, passaggi, tempo; "~" = automatica). Filtri nel ricettario. Tag SEO degli export (ricetta, cucina…) nascosti.
+- **Colori ingredienti**: verde ce l'ho, rosso manca (anche "poco"), arancio sostituto. Ricetta con sostituti = "fattibile*".
+- Migrazione `0006_durate_portate.sql`: va applicata PRIMA del push (`npm run db:migrate:remote`).
+
+## Costi, nutrizione, scadenze, annulla, backup (0.9.0)
+
+- **Durate con AI**: Catalogo → banner → `/catalogo/durate`. `POST /api/ai/durations` (lotti da 30) propone giorni dispensa/frigo, mesi freezer, giorni da aperto, usi per confezione. Proposte in giallo, modificabili, salvate sul dispositivo (`meta.dur_ai`); si salva solo ciò che confermi.
+- **Costo per porzione** (`src/db/insights.js`): ultimo prezzo pagato (`lastPrice` + `lastPriceUnit`, convertito all'unità del prodotto) × quantità della ricetta. "q.b." esclusi; "+" = alcuni prezzi mancanti. Ordina "Più economiche" (prima le ricette con tutti i prezzi).
+- **Valori nutrizionali** per porzione: colonna `recipes.nutrition` (JSON: kcal, carbs, sugar, fat, satfat, protein, fiber, chol, sodium) da `nutrition` schema.org/GZ. Per le ricette già importate: Importa → File → "Aggiorna" (riempie nutrizione e portata mancanti). Ordina "Meno calorie".
+- **Prima ciò che scade**: ricette che usano prodotti in scadenza (anticipo del luogo) in cima a ricettario (ordinamento di default), "Cosa cucino" e planner; badge "usa …" e avviso nel dettaglio.
+- **Annulla da ogni dispositivo**: ogni operazione con etichetta ha un `op` (outbox → `/api/sync` → `change_log.op_id/label`). `GET /api/ops` = ultime operazioni di tutti i dispositivi; `POST /api/undo {op, force}` ripristina lo stato "prima" (409 se righe cambiate dopo: si conferma con "Annulla comunque"). L'annulla locale (toast) marca l'operazione come annullata anche sul server (`undoes`).
+- **Foto nel backup**: Esporta JSON (versione 2) include le foto di ricette, passaggi e scontrini come data URL (toggle). Il ripristino le rimette in locale e le ricarica sul server.
+- Migrazione `0007_nutrizione_annulla.sql`: va applicata PRIMA del push, insieme alla 0006.

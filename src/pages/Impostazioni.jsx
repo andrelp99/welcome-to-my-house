@@ -6,11 +6,12 @@ import { Card } from '../components/ui/Card.jsx';
 import { ThemeToggle } from '../components/ui/ThemeToggle.jsx';
 import { Button, Toggle } from '../components/ui/kit.jsx';
 import { pushSupported, enablePush, disablePush, pushStatus, setPushPrefs, testPush } from '../db/push.js';
-import { getHouseKey } from '../api/client.js';
+import { getHouseKey, apiFetch, ApiError } from '../api/client.js';
 import { useSyncState, showToast } from '../hooks/useData.js';
-import { syncNow } from '../db/sync.js';
+import { syncNow, deviceId } from '../db/sync.js';
 import { db, SYNC_TABLES, alive } from '../db/db.js';
 import { undo, save } from '../db/repo.js';
+import { photoToDataUrl, restorePhoto } from '../db/photos.js';
 
 const STATUS = {
   idle: 'In attesa', syncing: 'Sincronizzo…', ok: 'Sincronizzato', offline: 'Offline', error: 'Errore', 'no-key': 'Dispositivo non attivato', 'bad-key': 'Chiave non valida',
@@ -22,10 +23,24 @@ export default function Impostazioni() {
   const history = useLiveQuery(() => db.history.orderBy('hid').reverse().limit(30).toArray(), []);
   const fileRef = useRef();
   const [busy, setBusy] = useState(false);
+  const [withPhotos, setWithPhotos] = useState(true);
+  const [prog, setProg] = useState(null);
 
   async function exportJson() {
-    const out = { app: 'welcome-to-my-house', version: 1, exported_at: new Date().toISOString(), tables: {} };
+    const out = { app: 'welcome-to-my-house', version: 2, exported_at: new Date().toISOString(), tables: {}, files: {} };
     for (const t of SYNC_TABLES) out.tables[t] = (await db.table(t).toArray()).filter(alive);
+    if (withPhotos) {
+      const keys = [...new Set(['recipes', 'recipe_steps', 'receipts'].flatMap((t) => out.tables[t].map((r) => r.photo_key)).filter(Boolean))];
+      let missing = 0;
+      for (let i = 0; i < keys.length; i++) {
+        setProg(`Foto ${i + 1}/${keys.length}`);
+        const url = await photoToDataUrl(keys[i]);
+        if (url) out.files[keys[i]] = url;
+        else missing++;
+      }
+      setProg(null);
+      if (missing) showToast(`${missing} foto non disponibili (offline?): backup senza di loro`);
+    }
     const blob = new Blob([JSON.stringify(out, null, 1)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -43,7 +58,9 @@ export default function Impostazioni() {
       for (const t of SYNC_TABLES) for (const row of parsed.tables?.[t] || []) ops.push({ table: t, row: { ...row, deleted: 0 } });
       // a blocchi per non fare transazioni enormi
       for (let i = 0; i < ops.length; i += 200) await save(ops.slice(i, i + 200), i === 0 ? `Ripristino backup (${ops.length} righe)` : undefined);
-      showToast(`Ripristinate ${ops.length} righe`);
+      let photos = 0;
+      for (const [id, url] of Object.entries(parsed.files || {})) if (await restorePhoto(id, url)) photos++;
+      showToast(`Ripristinate ${ops.length} righe${photos ? ` e ${photos} foto` : ''}`);
     } catch (e) {
       showToast(`Import fallito: ${e.message}`);
     } finally {
@@ -72,7 +89,9 @@ export default function Impostazioni() {
 
       <Notifiche />
 
-      <Card title="Cronologia (questo dispositivo)" icon={History}>
+      <Cronologia sync={sync} />
+
+      <Card title="Cronologia locale (offline)" icon={History}>
         {!history?.length ? (
           <p className="text-text-secondary text-sm">Nessuna modifica registrata.</p>
         ) : (
@@ -92,8 +111,11 @@ export default function Impostazioni() {
 
       <Card title="Backup" icon={Download}>
         <p className="text-text-secondary text-sm mb-3">Esporta tutto in un file JSON. Il ripristino reinserisce le righe (non cancella nulla).</p>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="ghost" onClick={exportJson}><Download size={16} /> Esporta JSON</Button>
+        <div className="mb-3">
+          <Toggle checked={withPhotos} onChange={setWithPhotos} label="Includi foto (ricette, passaggi, scontrini: file più grande)" />
+        </div>
+        <div className="flex flex-wrap gap-2 items-center">
+          <Button variant="ghost" disabled={!!prog} onClick={exportJson}><Download size={16} /> {prog || 'Esporta JSON'}</Button>
           <Button variant="ghost" disabled={busy} onClick={() => fileRef.current.click()}><Upload size={16} /> Ripristina</Button>
           <input ref={fileRef} type="file" accept="application/json" className="hidden" onChange={(e) => e.target.files[0] && importJson(e.target.files[0])} />
         </div>
@@ -113,7 +135,7 @@ export default function Impostazioni() {
         <p className="text-text-secondary text-sm">{key ? 'Dispositivo attivato.' : 'Dispositivo non attivato: apri il link di attivazione.'}</p>
       </Card>
       <Card title="Versione" icon={Info}>
-        <p className="text-text-secondary text-sm">0.6.0 · fase F5</p>
+        <p className="text-text-secondary text-sm">0.9.0 · costi, nutrizione, annulla ovunque</p>
       </Card>
     </div>
   );
@@ -171,6 +193,87 @@ function Notifiche() {
             </>
           )}
           <p className="text-xs text-text-muted">Anticipo scadenze per luogo: frigo 3 gg, dispensa 7, freezer 14, farmacia 30.</p>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// Cronologia condivisa: operazioni di tutti i dispositivi, annullabili da qui.
+function Cronologia({ sync }) {
+  const [items, setItems] = useState(null);
+  const [err, setErr] = useState(null);
+  const [me, setMe] = useState(null);
+  const [ask, setAsk] = useState(null); // { op, conflicts }
+  const [busy, setBusy] = useState(null);
+  const load = () =>
+    apiFetch('/api/ops?limit=40')
+      .then((r) => {
+        setItems(r.items);
+        setErr(null);
+      })
+      .catch((e) => setErr(e.message));
+  useEffect(() => {
+    deviceId().then(setMe);
+  }, []);
+  useEffect(() => {
+    load();
+  }, [sync.last]);
+
+  async function run(it, force = false) {
+    setBusy(it.op_id);
+    try {
+      await syncNow(); // prima invia le modifiche in coda
+      await apiFetch('/api/undo', { method: 'POST', body: JSON.stringify({ op: it.op_id, force, device: me }) });
+      setAsk(null);
+      showToast(`Annullato: ${it.label}`);
+      await syncNow();
+      await load();
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) setAsk({ it });
+      else showToast(`Annulla fallito: ${e.message}`);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <Card title="Cronologia (tutti i dispositivi)" icon={History}>
+      {err ? (
+        <p className="text-text-secondary text-sm">Non raggiungibile ({err}). Sotto trovi la cronologia locale.</p>
+      ) : !items ? (
+        <p className="text-text-secondary text-sm">Carico…</p>
+      ) : !items.length ? (
+        <p className="text-text-secondary text-sm">Nessuna operazione registrata (le modifiche fatte prima della 0.9 non sono raggruppate).</p>
+      ) : (
+        <ul className="divide-y divide-bg-border -my-2">
+          {items.map((it) => (
+            <li key={it.op_id} className="flex items-center gap-2 py-2 text-sm">
+              <div className="flex-1 min-w-0">
+                <div className={`truncate ${it.undone ? 'line-through text-text-muted' : ''}`}>{it.label}</div>
+                <div className="text-xs text-text-muted">
+                  {new Date(it.at).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} · {it.device === me ? 'questo dispositivo' : it.device}
+                  {it.n > 1 ? ` · ${it.n} righe` : ''}
+                </div>
+              </div>
+              {it.undone ? (
+                <span className="text-xs text-text-muted shrink-0">annullata</span>
+              ) : String(it.label).startsWith('Annullato:') ? null : (
+                <button type="button" disabled={!!busy} onClick={() => run(it)} className="inline-flex items-center gap-1 text-brand text-xs font-semibold shrink-0 disabled:opacity-40">
+                  <Undo2 size={14} /> {busy === it.op_id ? '…' : 'Annulla'}
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {ask && (
+        <div className="mt-3 rounded-md border border-warning/50 bg-warning/10 p-3 text-sm space-y-2">
+          <p>Alcune righe di “{ask.it.label}” sono state cambiate dopo. Annullando torni allo stato di prima anche per quelle.</p>
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={() => setAsk(null)}>Lascia stare</Button>
+            <Button onClick={() => run(ask.it, true)}>Annulla comunque</Button>
+          </div>
         </div>
       )}
     </Card>

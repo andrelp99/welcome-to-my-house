@@ -5,8 +5,9 @@ const HISTORY_MAX = 300;
 
 // Scrive una o piu' righe: aggiorna updated_at, accoda per il sync, salva il "prima" per l'annulla.
 // ops: [{ table, row }]  (row parziale ok se esiste gia': viene fusa)
-export async function save(ops, label) {
+export async function save(ops, label, { undoes = null } = {}) {
   const now = Date.now();
+  const op = label ? `op-${uuid()}` : null; // raggruppa le righe: annullabile da qualsiasi dispositivo
   const tables = [...new Set(ops.map((o) => o.table)), 'outbox', 'history'];
   const saved = await db.transaction('rw', tables, async () => {
     const out = [];
@@ -17,12 +18,12 @@ export async function save(ops, label) {
       const cur = await db.table(table).get(id);
       const next = { ...(cur || { deleted: 0 }), ...row, id, updated_at: Math.max(t++, (cur?.updated_at ?? 0) + 1) };
       await db.table(table).put(next);
-      await db.outbox.add({ table, id });
+      await db.outbox.add({ table, id, ...(op ? { op, label: String(label).slice(0, 120) } : {}), ...(undoes ? { undoes } : {}) });
       before.push({ table, id, row: cur || null });
       out.push(next);
     }
     if (label) {
-      await db.history.add({ at: now, label, before });
+      await db.history.add({ at: now, label, before, op });
       const n = await db.history.count();
       if (n > HISTORY_MAX) {
         const old = await db.history.orderBy('hid').limit(n - HISTORY_MAX).primaryKeys();
@@ -43,7 +44,7 @@ export async function undo(hid) {
   const h = hid ? await db.history.get(hid) : await db.history.orderBy('hid').last();
   if (!h) return null;
   const ops = h.before.map(({ table, id, row }) => ({ table, row: row ? { ...row } : { id, deleted: 1 } }));
-  await save(ops);
+  await save(ops, null, { undoes: h.op || null });
   await db.history.delete(h.hid);
   return h.label;
 }

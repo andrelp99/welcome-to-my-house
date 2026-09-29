@@ -86,7 +86,7 @@ export default function Cucina() {
   if (!recipe) return <Navigate to="/ricette" replace />;
   const steps = rec.steps[id] || [];
   const ings = rec.ings[id] || [];
-  const servings = Number(params.get('porzioni')) || recipe.servings;
+  const servings = Number(params.get('porzioni')) || 1;
   const scale = servings / (recipe.servings || 1);
   const step = steps[i];
   const last = i === steps.length - 1;

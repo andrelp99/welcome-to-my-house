@@ -1,11 +1,15 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { Plus, Search, Clock, Star, BookOpen, Download, Leaf, CalendarDays } from 'lucide-react';
+import { Plus, Search, Clock, Star, BookOpen, Download, Leaf, CalendarDays, Link2, ChevronRight } from 'lucide-react';
 import { recipeSeason, monthName } from '../db/season.js';
 import { useData, useRecipes } from '../hooks/useData.js';
-import { Button, Tabs, Empty } from '../components/ui/kit.jsx';
+import { Button, Tabs, Empty, Select } from '../components/ui/kit.jsx';
 import { Photo, SubstitutionsPanel } from '../components/recipes.jsx';
-import { recipeStatus, parseList, DIET_TAGS } from '../db/recipes.js';
+import { recipeStatus, parseList, DIET_TAGS, DIFFICULTY } from '../db/recipes.js';
+import { countUnlinked } from '../db/linker.js';
+import { autoTags, cleanTags, COURSES, TIMES } from '../db/tags.js';
+import { expiringSet, urgentOf, recipeCost, nutritionOf } from '../db/insights.js';
+import { euro } from '../db/logic.js';
 
 export default function Ricette() {
   const data = useData();
@@ -15,17 +19,40 @@ export default function Ricette() {
   const [q, setQ] = useState('');
   const [diet, setDiet] = useState([]);
   const [season, setSeason] = useState(false);
+  const [fCourse, setFCourse] = useState('');
+  const [fTime, setFTime] = useState('');
+  const [fDiff, setFDiff] = useState('');
+  const [sort, setSort] = useState('scade');
   const month = new Date().getMonth() + 1;
 
   const rows = useMemo(() => {
     if (!data || !rec) return [];
-    return rec.list.map((r) => ({ r, st: recipeStatus(rec.ings[r.id] || [], 1, data, rec.subs), diet: parseList(r.diet_tags), tags: parseList(r.tags), season: recipeSeason(rec.ings[r.id] || [], month).seasonal }));
+    const exp = expiringSet(data);
+    return rec.list.map((r) => {
+      const ings = rec.ings[r.id] || [];
+      const scale = 1 / (r.servings || 1);
+      return {
+        r,
+        st: recipeStatus(ings, scale, data, rec.subs),
+        diet: parseList(r.diet_tags),
+        tags: cleanTags(r.tags, r.title),
+        auto: autoTags(r, ings, rec.steps[r.id] || []),
+        season: recipeSeason(ings, month).seasonal,
+        urgent: urgentOf(ings, exp, data),
+        cost: recipeCost(ings, scale, data),
+        kcal: nutritionOf(r)?.kcal ?? null,
+      };
+    });
   }, [data, rec, month]);
 
   if (!data || !rec) return null;
   const s = q.trim().toLowerCase();
-  const list = rows.filter(({ r, st, diet: d, tags, season: inSeason }) => {
+  const list = rows.filter(({ r, st, diet: d, tags, season: inSeason, auto }) => {
     if (season && !inSeason) return false;
+    if (fCourse && auto.course?.value !== fCourse) return false;
+    if (fTime && TIMES.findIndex((x) => x.v === auto.time) > TIMES.findIndex((x) => x.v === fTime)) return false;
+    if (fTime && !auto.time) return false;
+    if (fDiff && auto.difficulty?.value !== fDiff) return false;
     if (tab === 'ok' && !st.feasible) return false;
     if (tab === 'fav' && !r.favorite) return false;
     if (diet.length && !diet.every((t) => d.includes(t))) return false;
@@ -35,6 +62,15 @@ export default function Ricette() {
     }
     return true;
   });
+  const SORTS = {
+    scade: (a, b) => b.urgent.length - a.urgent.length || b.st.feasible - a.st.feasible || a.r.title.localeCompare(b.r.title, 'it'),
+    // prima le ricette con tutti i prezzi noti, poi quelle parziali (il costo e' un minimo)
+    costo: (a, b) => (a.cost.known ? (a.cost.unknown.length ? 1 : 0) : 2) - (b.cost.known ? (b.cost.unknown.length ? 1 : 0) : 2) || a.cost.total - b.cost.total || a.r.title.localeCompare(b.r.title, 'it'),
+    kcal: (a, b) => (a.kcal ?? Infinity) - (b.kcal ?? Infinity),
+    nome: (a, b) => a.r.title.localeCompare(b.r.title, 'it'),
+  };
+  list.sort(SORTS[sort]);
+  const unlinked = countUnlinked(rec, data);
   const counts = { all: rows.length, ok: rows.filter((x) => x.st.feasible).length, fav: rows.filter((x) => x.r.favorite).length };
 
   return (
@@ -42,7 +78,7 @@ export default function Ricette() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold">Ricettario</h1>
-          <p className="text-text-secondary text-sm">Ingredienti confrontati con la dispensa.</p>
+          <p className="text-text-secondary text-sm">Dosi per 1 porzione, confrontate con la dispensa. <span className="text-warning">*</span> = con sostituti.</p>
         </div>
         {tab !== 'subs' && (
           <div className="flex gap-2 shrink-0">
@@ -70,6 +106,16 @@ export default function Ricette() {
         ]}
       />
 
+      {tab !== 'subs' && unlinked > 0 && (
+        <Link to="/ricette/collega" className="flex items-center gap-3 rounded-lg border border-brand/50 bg-brand/10 px-4 py-3 hover:border-brand">
+          <Link2 size={18} className="text-brand shrink-0" />
+          <span className="flex-1 text-sm">
+            <b>{unlinked} ingredienti</b> non collegati alla dispensa: le ricette non sanno cosa hai in casa.
+          </span>
+          <span className="text-brand text-sm font-semibold inline-flex items-center">Collega <ChevronRight size={16} /></span>
+        </Link>
+      )}
+
       {tab === 'subs' ? (
         <SubstitutionsPanel data={data} rec={rec} />
       ) : (
@@ -82,6 +128,26 @@ export default function Ricette() {
               placeholder="Cerca per nome, tag o ingrediente…"
               className="w-full rounded-md bg-bg-elevated border border-bg-border pl-9 pr-3 py-2.5 placeholder:text-text-muted focus:outline-none focus:border-brand"
             />
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <Select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Ordina">
+              <option value="scade">Prima ciò che scade</option>
+              <option value="costo">Più economiche</option>
+              <option value="kcal">Meno calorie</option>
+              <option value="nome">Nome</option>
+            </Select>
+            <Select value={fCourse} onChange={(e) => setFCourse(e.target.value)} aria-label="Portata">
+              <option value="">Portata</option>
+              {COURSES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </Select>
+            <Select value={fTime} onChange={(e) => setFTime(e.target.value)} aria-label="Tempo">
+              <option value="">Tempo</option>
+              {TIMES.slice(0, 3).map((t) => <option key={t.v} value={t.v}>{t.v}</option>)}
+            </Select>
+            <Select value={fDiff} onChange={(e) => setFDiff(e.target.value)} aria-label="Difficoltà">
+              <option value="">Difficoltà</option>
+              {DIFFICULTY.map((d) => <option key={d} value={d}>{d}</option>)}
+            </Select>
           </div>
           <div className="flex flex-wrap gap-2">
             <button
@@ -107,8 +173,7 @@ export default function Ricette() {
             <Empty icon={BookOpen}>{rows.length === 0 ? 'Nessuna ricetta. Crea con + o importa (link, testo, foto, file GZ).' : 'Nessuna ricetta con questi filtri.'}</Empty>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {list.map(({ r, st, diet: d, season: inSeason }) => {
-                const time = (Number(r.prep_min) || 0) + (Number(r.cook_min) || 0);
+              {list.map(({ r, st, diet: d, season: inSeason, auto, urgent, cost, kcal }) => {
                 return (
                   <Link key={r.id} to={`/ricette/${r.id}`} className="flex sm:flex-col gap-3 sm:gap-0 rounded-lg border border-bg-border bg-bg-surface shadow-card overflow-hidden hover:border-brand transition-colors">
                     <Photo id={r.photo_key} className="w-24 h-24 sm:w-full sm:h-36 shrink-0" />
@@ -118,15 +183,24 @@ export default function Ricette() {
                         {r.title}
                       </div>
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
-                        {time > 0 && (
+                        {auto.course && <span className="font-semibold text-text-secondary">{auto.course.value}</span>}
+                        {auto.time && (
                           <span className="inline-flex items-center gap-1">
-                            <Clock size={12} /> {time}′
+                            <Clock size={12} /> {auto.time}
                           </span>
                         )}
+                        {auto.difficulty && <span>{auto.difficulty.value}</span>}
+                        {cost.known > 0 && <span title={cost.unknown.length ? `senza prezzo: ${cost.unknown.join(', ')}` : 'costo stimato per porzione'}>{euro(cost.total)}{cost.unknown.length ? '+' : ''}</span>}
+                        {kcal != null && <span>{Math.round(kcal)} kcal</span>}
                         {r.cooked_count ? <span>cucinata {r.cooked_count}×</span> : null}
                       </div>
                       <div className="flex flex-wrap gap-1.5">
                         <StatusChip st={st} />
+                        {urgent.length > 0 && (
+                          <span title={`in scadenza: ${urgent.join(', ')}`} className="rounded-full bg-warning/15 text-warning border border-warning/40 px-2 py-0.5 text-[11px] font-semibold">
+                            usa {urgent.length === 1 ? urgent[0] : `${urgent.length} in scadenza`}
+                          </span>
+                        )}
                         {inSeason && <Leaf size={14} className="text-positive self-center" aria-label="di stagione" />}
                         {d.slice(0, 2).map((t) => (
                           <span key={t} className="rounded-full border border-bg-border px-2 py-0.5 text-[11px] text-text-secondary">{t}</span>
@@ -148,7 +222,7 @@ export function StatusChip({ st }) {
   if (st.feasible)
     return (
       <span className="rounded-full bg-positive/15 text-positive border border-positive/40 px-2 py-0.5 text-[11px] font-semibold">
-        fattibile{st.withSub ? ' (con sostituti)' : ''}
+        fattibile{st.withSub ? <span className="text-warning" title="con sostituti">*</span> : ''}
       </span>
     );
   if (st.missing)

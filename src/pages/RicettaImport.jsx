@@ -5,7 +5,8 @@ import { useData, useRecipes, showToast } from '../hooks/useData.js';
 import { Button, IconButton, Tabs, Input, Toggle } from '../components/ui/kit.jsx';
 import { importFromUrl, recipeFromAi, materializePhotos, parseImportFile, saveDrafts, normTitle } from '../db/importer.js';
 import { fileToDataUrl } from '../db/photos.js';
-import { undo } from '../db/repo.js';
+import { undo, save } from '../db/repo.js';
+import { learnedLinks } from '../db/recipes.js';
 
 const txtArea = 'w-full rounded-md bg-bg-elevated border border-bg-border px-3 py-2.5 text-text-primary placeholder:text-text-muted focus:outline-none focus:border-brand';
 const firstUrl = (s) => String(s || '').match(/https?:\/\/[^\s]+/)?.[0] || '';
@@ -194,6 +195,23 @@ function BulkImport({ data, rec }) {
     return (d) => (d.source_url && urls.has(d.source_url)) || titles.has(normTitle(d.title));
   }, [rec]);
 
+  // Ricette gia' presenti a cui mancano dati che il file ha (valori nutrizionali, portata).
+  const updates = useMemo(() => {
+    if (!drafts) return [];
+    const byUrl = new Map(rec.list.filter((r) => r.source_url).map((r) => [r.source_url, r]));
+    const byTitle = new Map(rec.list.map((r) => [normTitle(r.title), r]));
+    const out = [];
+    for (const d of drafts) {
+      const r = (d.source_url && byUrl.get(d.source_url)) || byTitle.get(normTitle(d.title));
+      if (!r) continue;
+      const row = { id: r.id };
+      if (!r.nutrition && d.nutrition) row.nutrition = d.nutrition;
+      if (!r.course && d.course) row.course = d.course;
+      if (Object.keys(row).length > 1) out.push({ table: 'recipes', row });
+    }
+    return out;
+  }, [drafts, rec]);
+
   async function load(file) {
     setErr(null);
     try {
@@ -217,7 +235,7 @@ function BulkImport({ data, rec }) {
     const batch = [];
     const flush = async () => {
       if (!batch.length) return;
-      await saveDrafts(batch.splice(0), data.products, `Import ricette ${done}/${todo.length}`);
+      await saveDrafts(batch.splice(0), data.products, `Import ricette ${done}/${todo.length}`, learnedLinks(rec?.ings, data.products));
     };
     for (const { d, i } of todo) {
       const full = await materializePhotos(d, { steps: stepPhotos, onStep: () => setProgress((p) => ({ ...p, photosDone: ++photosDone })) });
@@ -259,6 +277,12 @@ function BulkImport({ data, rec }) {
               <button type="button" className="text-text-secondary" onClick={() => setSel(new Set())}>Nessuna</button>
             </div>
           </div>
+          {updates.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-brand/40 bg-brand/10 px-3 py-2 text-sm">
+              <span>{updates.length} ricette già presenti senza valori nutrizionali o portata.</span>
+              <Button variant="ghost" onClick={async () => { await save(updates, `Aggiornate ${updates.length} ricette dal file`); showToast(`Aggiornate ${updates.length} ricette`, { label: 'Annulla', run: () => undo() }); }}>Aggiorna</Button>
+            </div>
+          )}
           <Toggle checked={stepPhotos} onChange={setStepPhotos} label="Anche le foto dei passaggi" />
           <ul className="max-h-[50vh] overflow-y-auto rounded-md border border-bg-border divide-y divide-bg-border">
             {drafts.map((d, i) => {

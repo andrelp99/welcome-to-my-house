@@ -1,14 +1,14 @@
-import { useState } from 'react';
-import { Trash2, Snowflake, PackageOpen, Check } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Trash2, Snowflake, PackageOpen, Check, X } from 'lucide-react';
 import { Modal, Field, Input, Select, Toggle, Button, ProductPicker, Stepper } from './ui/kit.jsx';
 import { put, save } from '../db/repo.js';
-import { UNITS, todayISO, autoAddBelowStock, minStock, closeLot } from '../db/logic.js';
+import { UNITS, todayISO, autoAddBelowStock, minStock, closeLot, allowedLocation, autoExpiry, durationLabel, usesOf } from '../db/logic.js';
 import { showToast } from '../hooks/useData.js';
 import { undo } from '../db/repo.js';
 
 const num = (v) => (v === '' || v == null ? null : Number(String(v).replace(',', '.')));
 
-export function ProductForm({ data, product, initialName = '', area = 'cibo', onClose, onSaved }) {
+export function ProductForm({ data, product, initialName = '', area = 'cibo', draft = null, onClose, onSaved }) {
   const [f, setF] = useState(
     product || {
       name: initialName,
@@ -21,8 +21,12 @@ export function ProductForm({ data, product, initialName = '', area = 'cibo', on
       min_stock: null,
       open_shelf_days: null,
       freezer_max_months: null,
+      pantry_days: null,
+      fridge_days: null,
+      uses_per_pack: null,
       alternatives: '',
       notes: '',
+      ...(draft || {}),
     }
   );
   const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
@@ -32,7 +36,18 @@ export function ProductForm({ data, product, initialName = '', area = 'cibo', on
 
   async function submit() {
     if (!f.name.trim()) return;
-    const row = { ...f, name: f.name.trim(), min_stock: num(f.min_stock), open_shelf_days: num(f.open_shelf_days), freezer_max_months: num(f.freezer_max_months) };
+    const row = {
+      ...f,
+      name: f.name.trim(),
+      min_stock: num(f.min_stock),
+      open_shelf_days: num(f.open_shelf_days),
+      freezer_max_months: num(f.freezer_max_months),
+      pantry_days: num(f.pantry_days),
+      fridge_days: num(f.fridge_days),
+      uses_per_pack: f.default_unit === 'conf' ? num(f.uses_per_pack) : null,
+    };
+    // luogo abituale coerente con le durate
+    if (!allowedLocation(row, row.default_location_id)) row.default_location_id = locs.find((l) => l.area === row.area && allowedLocation(row, l.id))?.id || 'loc-altro';
     const saved = await put('products', row, product ? `Modificato ${row.name}` : `Nuovo prodotto ${row.name}`);
     await autoAddBelowStock();
     onSaved?.(saved);
@@ -88,7 +103,7 @@ export function ProductForm({ data, product, initialName = '', area = 'cibo', on
         </Field>
         <Field label="Luogo abituale">
           <Select value={f.default_location_id || ''} onChange={(e) => set('default_location_id')(e.target.value)}>
-            {locs.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+            {locs.filter((l) => l.id === f.default_location_id || allowedLocation({ ...f, pantry_days: num(f.pantry_days), fridge_days: num(f.fridge_days), freezer_max_months: num(f.freezer_max_months) }, l.id)).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
           </Select>
         </Field>
       </div>
@@ -101,23 +116,62 @@ export function ProductForm({ data, product, initialName = '', area = 'cibo', on
           <Input inputMode="decimal" value={f.min_stock ?? ''} onChange={(e) => set('min_stock')(e.target.value)} placeholder={String(catDefault ?? 1)} />
         </Field>
       )}
+      {f.default_unit === 'conf' && (
+        <Field label="Usi per confezione" hint="Es. dado 10, bustine lievito 3. Le ricette scalano a usi (“2 dadi” = 2 usi).">
+          <Input inputMode="decimal" value={f.uses_per_pack ?? ''} onChange={(e) => set('uses_per_pack')(e.target.value)} placeholder="—" />
+        </Field>
+      )}
       {f.area === 'cibo' && (
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Dura da aperto (gg)">
-            <Input inputMode="numeric" value={f.open_shelf_days ?? ''} onChange={(e) => set('open_shelf_days')(e.target.value)} />
-          </Field>
-          <Field label="Max in freezer (mesi)">
-            <Input inputMode="numeric" value={f.freezer_max_months ?? ''} onChange={(e) => set('freezer_max_months')(e.target.value)} placeholder="3" />
-          </Field>
+        <div className="space-y-2">
+          <div className="text-xs uppercase tracking-wider font-semibold text-text-muted">Quanto dura</div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="In dispensa (gg)">
+              <Input inputMode="numeric" value={f.pantry_days ?? ''} onChange={(e) => set('pantry_days')(e.target.value)} placeholder="non ci va" />
+            </Field>
+            <Field label="In frigo (gg)">
+              <Input inputMode="numeric" value={f.fridge_days ?? ''} onChange={(e) => set('fridge_days')(e.target.value)} placeholder="non ci va" />
+            </Field>
+            <Field label="In freezer (mesi)">
+              <Input inputMode="numeric" value={f.freezer_max_months ?? ''} onChange={(e) => set('freezer_max_months')(e.target.value)} placeholder="non ci va" />
+            </Field>
+            <Field label="Da aperto (gg)">
+              <Input inputMode="numeric" value={f.open_shelf_days ?? ''} onChange={(e) => set('open_shelf_days')(e.target.value)} />
+            </Field>
+          </div>
+          <p className="text-xs text-text-muted">Da quando entra in casa. Vuoto = lì non ci va (se imposti almeno dispensa o frigo). La scadenza dei lotti si calcola dal luogo in cui li metti.</p>
         </div>
       )}
-      <Field label="Alternative accettate" hint="Separate da virgola, es. Penne, Rigatoni">
-        <Input value={f.alternatives || ''} onChange={(e) => set('alternatives')(e.target.value)} />
+      <Field label="Alternative accettate" hint="Se in lista c'è questo prodotto, vanno bene anche questi.">
+        <AltPicker data={data} product={f} value={f.alternatives} onChange={set('alternatives')} />
       </Field>
       <Field label="Note">
         <Input value={f.notes || ''} onChange={(e) => set('notes')(e.target.value)} />
       </Field>
     </Modal>
+  );
+}
+
+// Scelta multipla delle alternative (salvate come nomi separati da virgola).
+function AltPicker({ data, product, value, onChange }) {
+  const list = String(value || '').split(',').map((x) => x.trim()).filter(Boolean);
+  const others = Object.fromEntries(Object.entries(data.products).filter(([, p]) => p.area === product.area && p.id !== product.id && !list.some((n) => n.toLowerCase() === p.name.toLowerCase())));
+  const setList = (l) => onChange(l.join(', '));
+  return (
+    <div className="space-y-2">
+      {list.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {list.map((n) => (
+            <span key={n} className="inline-flex items-center gap-1 rounded-full bg-brand/15 border border-brand/50 px-3 py-1 text-sm">
+              {n}
+              <button type="button" aria-label={`Togli ${n}`} onClick={() => setList(list.filter((x) => x !== n))}>
+                <X size={14} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <ProductPicker products={others} onPick={(p) => setList([...list, p.name])} onCreate={(name) => setList([...list, name])} placeholder="Aggiungi alternativa…" />
+    </div>
   );
 }
 
@@ -137,10 +191,21 @@ export function LotForm({ data, area, lot, presetProduct, onClose }) {
   );
   const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
 
+  const [autoExp, setAutoExp] = useState(null); // scadenza proposta dal luogo (sovrascrivibile)
+  function place(p, locId, s) {
+    const exp = lot ? null : autoExpiry(p, locId);
+    const keep = s.expiry_date && s.expiry_date !== autoExp; // scritta a mano: non la tocco
+    setAutoExp(exp);
+    return { ...s, location_id: locId, expiry_date: keep ? s.expiry_date : exp || (s.expiry_date === autoExp ? '' : s.expiry_date) };
+  }
   function pick(p) {
     setProduct(p);
-    setF((s) => ({ ...s, unit: p.default_unit, location_id: p.default_location_id || s.location_id, qty: s.qty || 1 }));
+    setF((s) => place(p, p.default_location_id || s.location_id, { ...s, unit: p.default_unit, qty: s.qty || 1 }));
   }
+  useEffect(() => {
+    if (presetProduct && !lot) setF((s) => place(presetProduct, s.location_id, s));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const loc = data.locations[f.location_id];
   const isFreezer = f.location_id === 'loc-freezer';
 
@@ -205,6 +270,7 @@ export function LotForm({ data, area, lot, presetProduct, onClose }) {
             <Field label="Quantità">
               <Stepper value={Number(f.qty)} unit={f.unit} onChange={set('qty')} />
             </Field>
+            {usesOf(product) && f.unit === 'conf' && <span className="pb-3 text-sm text-text-muted">≈ {Math.round(Number(f.qty) * usesOf(product) * 10) / 10} usi</span>}
             <Field label="Unità">
               <Select value={f.unit} onChange={(e) => set('unit')(e.target.value)}>
                 {UNITS.map((u) => <option key={u}>{u}</option>)}
@@ -213,16 +279,17 @@ export function LotForm({ data, area, lot, presetProduct, onClose }) {
           </div>
           <Field label="Dove">
             <div className="flex flex-wrap gap-2">
-              {data.locationList.filter((l) => l.area === product.area || l.id === 'loc-altro').map((l) => (
-                <button key={l.id} type="button" onClick={() => set('location_id')(l.id)}
+              {data.locationList.filter((l) => (l.area === product.area || l.id === 'loc-altro') && (allowedLocation(product, l.id) || l.id === f.location_id)).map((l) => (
+                <button key={l.id} type="button" onClick={() => setF((s) => place(product, l.id, s))}
                   className={`rounded-full border px-3 py-1.5 text-sm ${f.location_id === l.id ? 'bg-brand text-brand-on border-brand' : 'border-bg-border bg-bg-elevated'}`}>
                   {l.name}
+                  {durationLabel(product, l.id) ? <span className="opacity-70"> · {durationLabel(product, l.id)}</span> : null}
                 </button>
               ))}
             </div>
           </Field>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Scadenza">
+            <Field label="Scadenza" hint={autoExp && f.expiry_date === autoExp ? 'Calcolata dal luogo, modificabile' : undefined}>
               <Input type="date" value={f.expiry_date || ''} onChange={(e) => set('expiry_date')(e.target.value)} />
             </Field>
             {isFreezer ? (
@@ -247,7 +314,7 @@ export async function quickLotAction(kind, lot, product) {
   const ops = {
     open: { id: lot.id, opened_at: todayISO() },
     freeze: { id: lot.id, location_id: 'loc-freezer', frozen_at: todayISO() },
-    thaw: { id: lot.id, location_id: 'loc-frigo', frozen_at: null, opened_at: todayISO() },
+    thaw: { id: lot.id, location_id: 'loc-frigo', frozen_at: null, opened_at: todayISO(), ...(autoExpiry(product, 'loc-frigo') ? { expiry_date: autoExpiry(product, 'loc-frigo') } : {}) },
   }[kind];
   const label = { open: 'Aperto', freeze: 'Congelato', thaw: 'Scongelato' }[kind];
   await save([{ table: 'stock_lots', row: ops }], `${label} ${product.name}`);

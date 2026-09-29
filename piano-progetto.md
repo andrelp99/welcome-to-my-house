@@ -1,25 +1,27 @@
-# Welcome to My House — decisioni e stato (agg. 2026-09-28)
+# Welcome to My House — decisioni e stato (agg. 2026-09-29)
 
 Doc completo: https://claude.ai/code/artifact/90dba295-701b-4040-81e0-b78035e877ec
 
 ## Stato
-- F0, F1 chiuse. F2 ricettario, F3 import + AI, F4 planner + push in produzione (verifica in corso). F5 finanze scritta, da deployare (zip F5-finanze, nessuna migrazione).
-- Versione app: 0.6.0 (Impostazioni → Versione).
-- Migrazioni applicate in remoto: 0001_init, 0002_sync_seed, 0003_recipes, 0004_import, 0005_planner_push.
+- F0, F1 chiuse. F2–F5 in produzione (verifica in corso). 145 ricette GZ importate.
+- 0.7.0 Collega ingredienti + 0.8.0 durate/confezioni/tag/colori + 0.9.0 durate AI, costo porzione, nutrizione, prima ciò che scade, annulla ovunque, foto nel backup: file nella cartella, da deployare.
+- Versione app: 0.9.0. Migrazioni nuove 0006 + 0007 (da applicare in remoto PRIMA del push).
+- Migrazioni applicate in remoto: 0001 … 0005.
 
 ## Verifiche aperte (Andrea)
 - F2: 10 ricette caricate e cucinate
-- F3: import 145 ricette da data/gz-il-mio-ricettario.json (anteprima: se "0 ingr." adattare parser); scontrino reale ≤ 2 correzioni; import link GZ da server Cloudflare (possibile 403)
+- F3: scontrino reale ≤ 2 correzioni; import link GZ da server Cloudflare (possibile 403)
 - F4: settimana pianificata + notifica ricevuta su ogni device (Impostazioni → Notifiche → Attiva)
 - F5: budget cibo/casa, primo mese di dati
+- 0.9.0: Catalogo → Durate → Proponi con AI → conferma; Importa → File GZ → Aggiorna (nutrizione); prova annulla da un altro dispositivo; backup con foto
+- 0.8.0: impostare durate (dispensa/frigo/freezer) e usi per confezione sui prodotti usati; controllare portata/difficoltà auto
+- Collega: 451 ingredienti GZ (230 diversi) da collegare con AI → rivedere proposte (unità/categoria prodotti nuovi)
 
 ## Residui / da fare
-- Annulla tra dispositivi (oggi cronologia locale, 300 voci; base in change_log server)
-- Foto nel backup JSON (oggi escluse)
-- Match ingredienti con AI quando le regole non bastano (oggi collegamento a mano)
+- Nessun residuo tecnico aperto. Cronologia condivisa solo da 0.9 in poi
 
 ## Come lavoriamo
-- Claude scrive nel clone del repo (build + test: wrangler dev + D1 locale + Playwright) → zip con i soli file cambiati
+- Claude scrive nel clone del repo (build + test: wrangler dev + D1 locale + Playwright) → copia i file cambiati direttamente nella cartella (o zip)
 - Andrea: estrae lo zip nella root (C:\Users\andre\Whole House App), toglie lo zip, `npm run db:migrate:remote` se c'è una migrazione nuova, poi `git add -A` → commit → push. Push su main = deploy (Workers Builds)
 - Nessuna dipendenza npm aggiunta dopo F1 (niente npm install)
 - NON fare git dal VM; node_modules non installare dal VM nella cartella
@@ -55,6 +57,6 @@ Doc completo: https://claude.ai/code/artifact/90dba295-701b-4040-81e0-b78035e877
 - Prezzi: pagato + pieno/sconto. Tutto modificabile, annulla + cronologia
 - Preferiti (stella → spesa base), Essenziali (scorta per prodotto, default categoria)
 - NO barcode, reparti, promemoria casa, scorciatoie Android, liste per negozio, timer multipli, vocale, QR, prezzo-soglia
-- Ricette: porzioni default 1
+- Ricette: porzione standard 1 ovunque (servings = dosi originali). Confezioni: ricetta scala a usi ("2 dadi" = 2 usi). Durate: una per luogo, vuoto = non ci va
 - Avvisi: anticipo frigo 3gg, dispensa 7, freezer 14, farmacia 30
 - Tema default SCURO, palette giallo + rosso

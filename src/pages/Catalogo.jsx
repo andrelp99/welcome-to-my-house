@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router';
-import { Plus, Search, Star, ShieldCheck } from 'lucide-react';
+import { useSearchParams, Link } from 'react-router';
+import { Plus, Search, Star, ShieldCheck, Timer } from 'lucide-react';
 import { useData } from '../hooks/useData.js';
 import { Button, Tabs } from '../components/ui/kit.jsx';
 import { ProductForm } from '../components/forms.jsx';
 import { put } from '../db/repo.js';
-import { fmtQty, minStock, autoAddBelowStock } from '../db/logic.js';
+import { fmtQty, minStock, autoAddBelowStock, qtyLabel } from '../db/logic.js';
 
 export default function Catalogo() {
   const data = useData();
@@ -35,6 +35,7 @@ export default function Catalogo() {
     if (k === 'essential') await autoAddBelowStock();
   };
 
+  const noDur = Object.values(data.products).filter((p) => p.area === 'cibo' && p.category_id !== 'cat-avanzi' && p.pantry_days == null && p.fridge_days == null).length;
   return (
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
@@ -44,6 +45,13 @@ export default function Catalogo() {
         </div>
         <Button onClick={() => setModal({})}><Plus size={18} /> Nuovo</Button>
       </div>
+      {noDur > 0 && (
+        <Link to="/catalogo/durate" className="flex items-center gap-3 rounded-lg border border-brand/50 bg-brand/10 px-4 py-3 hover:border-brand">
+          <Timer size={18} className="text-brand shrink-0" />
+          <span className="flex-1 text-sm"><b>{noDur} prodotti</b> senza durate: scadenze automatiche spente.</span>
+          <span className="text-brand text-sm font-semibold">Imposta →</span>
+        </Link>
+      )}
       <Tabs value={area} onChange={setArea} tabs={[{ value: 'cibo', label: 'Cibo' }, { value: 'casa', label: 'Casa' }]} />
       <Tabs value={filter} onChange={setFilter} tabs={[{ value: 'all', label: 'Tutti' }, { value: 'fav', label: '★ Preferiti' }, { value: 'ess', label: '🛡 Essenziali' }]} />
       <div className="relative">
@@ -62,7 +70,7 @@ export default function Catalogo() {
                   <button type="button" className="flex-1 min-w-0 text-left" onClick={() => setModal({ product: p })}>
                     <div className="font-medium truncate">{p.name}</div>
                     <div className="text-xs text-text-muted">
-                      {data.locations[p.default_location_id]?.name} · in casa {fmtQty(have)} {p.default_unit}
+                      {data.locations[p.default_location_id]?.name} · in casa {qtyLabel(have, p.default_unit, p)}
                       {m != null ? ` / min ${fmtQty(m)}` : ''}
                     </div>
                   </button>

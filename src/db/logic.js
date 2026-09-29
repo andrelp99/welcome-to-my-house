@@ -18,6 +18,42 @@ export function lotLimit(lot, product) {
   return dates.reduce((a, b) => (a < b ? a : b));
 }
 
+// ── Durate per luogo ──
+// Dispensa e frigo: giorni da quando entra in casa. Freezer: mesi (freezer_max_months). Vuoto = non ci va,
+// ma solo se il prodotto ha almeno una durata impostata (altrimenti va ovunque, come prima).
+export const LOC_DAYS = { 'loc-dispensa': 'pantry_days', 'loc-frigo': 'fridge_days' };
+const set_ = (v) => v != null && v !== '';
+export const hasDurations = (p) => !!p && p.area === 'cibo' && (set_(p.pantry_days) || set_(p.fridge_days));
+export function allowedLocation(p, locId) {
+  if (!hasDurations(p)) return true;
+  if (locId === 'loc-freezer') return set_(p.freezer_max_months);
+  const k = LOC_DAYS[locId];
+  return k ? set_(p[k]) : true; // "altro" sempre
+}
+// Scadenza proposta per un lotto che entra in un luogo (null se il prodotto non ha la durata per quel luogo).
+export function autoExpiry(p, locId, from = todayISO()) {
+  const k = LOC_DAYS[locId];
+  if (!p || !k || !set_(p[k])) return null;
+  return format(addDays(parseISO(from), Number(p[k])), 'yyyy-MM-dd');
+}
+// Durata in parole per un luogo: "7 gg", "3 mesi".
+export function durationLabel(p, locId) {
+  if (locId === 'loc-freezer') return set_(p?.freezer_max_months) ? `${p.freezer_max_months} mesi` : null;
+  const k = LOC_DAYS[locId];
+  return k && set_(p?.[k]) ? `${p[k]} gg` : null;
+}
+
+// ── Confezioni con N usi (dado, bustine, vasetti...) ──
+export const usesOf = (p) => (p?.default_unit === 'conf' && Number(p.uses_per_pack) > 0 ? Number(p.uses_per_pack) : null);
+// "2 conf · ~20 usi"
+export function qtyLabel(qty, unit, p) {
+  const u = usesOf(p);
+  const base = `${fmtQty(Math.round(qty * 1000) / 1000)} ${unit}`;
+  return u && unit === 'conf' ? `${base} · ~${fmtQty(Math.round(qty * u * 10) / 10)} usi` : base;
+}
+// Passo del "-" in dispensa: 1 uso per le confezioni a usi.
+export const stepForProduct = (p, unit) => (usesOf(p) && unit === 'conf' ? 1 / usesOf(p) : stepFor(unit));
+
 // Semaforo: scaduto (rosso) / in scadenza entro anticipo del luogo (giallo) / ok (verde) / senza data.
 export function lotStatus(lot, product, location) {
   const limit = lotLimit(lot, product);
@@ -60,11 +96,13 @@ export async function loadAll() {
   for (const l of liveLots) stock[l.product_id] = (stock[l.product_id] || 0) + Number(l.qty);
   // ultimo prezzo pagato per prodotto (stima costo lista)
   const lastPrice = {};
+  const lastPriceUnit = {}; // unita' della riga d'acquisto a cui si riferisce lastPrice
   const linePrice = {}; // prezzo unitario della riga d'acquisto (valore esatto del lotto)
   const liveLines = lines.filter(alive).sort((a, b) => a.updated_at - b.updated_at);
   for (const pl of liveLines)
     if (pl.price_paid != null && pl.qty) {
       lastPrice[pl.product_id] = pl.price_paid / pl.qty;
+      lastPriceUnit[pl.product_id] = pl.unit || null;
       linePrice[pl.id] = pl.price_paid / pl.qty;
     }
   // ultimo prezzo per catena (stima lista per supermercato)
@@ -83,6 +121,7 @@ export async function loadAll() {
     lots: liveLots,
     stock,
     lastPrice,
+    lastPriceUnit,
     lastPriceByChain,
     linePrice,
     shopping: shopping.filter(alive),
@@ -135,11 +174,13 @@ export async function setTotalQty(product, target, data) {
   const ops = [];
   if (diff > 0) {
     const last = lots[lots.length - 1];
-    if (last && !last.expiry_date) ops.push({ table: 'stock_lots', row: { id: last.id, qty: Number(last.qty) + diff } });
+    const loc = product.default_location_id || 'loc-altro';
+    const exp = autoExpiry(product, loc);
+    if (last && !last.expiry_date && !exp) ops.push({ table: 'stock_lots', row: { id: last.id, qty: Math.round((Number(last.qty) + diff) * 1000) / 1000 } });
     else
       ops.push({
         table: 'stock_lots',
-        row: { product_id: product.id, qty: diff, unit: product.default_unit, location_id: product.default_location_id || 'loc-altro' },
+        row: { product_id: product.id, qty: diff, unit: product.default_unit, location_id: loc, expiry_date: exp, frozen_at: loc === 'loc-freezer' ? todayISO() : null },
       });
   } else {
     let toTake = -diff;

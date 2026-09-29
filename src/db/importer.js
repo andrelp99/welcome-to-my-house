@@ -1,7 +1,8 @@
 import { apiFetch } from '../api/client.js';
 import { uuid } from './db.js';
 import { save } from './repo.js';
-import { parseIngredientLine, matchProduct, normUnit, detectTimer, joinList, parseList } from './recipes.js';
+import { courseOf, cleanTags, COURSES } from './tags.js';
+import { parseIngredientLine, autoLink, normUnit, detectTimer, joinList, parseList } from './recipes.js';
 
 // Bozza ricetta = formato unico per editor e import:
 // { title, servings, prep_min, cook_min, rest_min, difficulty, tags, notes, source_url, photo_key, photo_url,
@@ -138,6 +139,29 @@ function stepsOf(v) {
   return out;
 }
 
+// Valori nutrizionali per porzione (schema.org NutritionInformation o chiavi italiane) -> JSON compatto.
+const NUTRI = {
+  kcal: ['calories', 'calorie', 'kcal', 'energia'],
+  carbs: ['carbohydrateContent', 'carboidrati'],
+  sugar: ['sugarContent', 'zuccheri'],
+  fat: ['fatContent', 'grassi'],
+  satfat: ['saturatedFatContent', 'grassi_saturi'],
+  protein: ['proteinContent', 'proteine'],
+  fiber: ['fiberContent', 'fibre'],
+  sodium: ['sodiumContent', 'sodio'],
+  chol: ['cholesterolContent', 'colesterolo'],
+};
+export function nutritionOf(v) {
+  if (!v || typeof v !== 'object') return null;
+  const out = {};
+  for (const [k, keys] of Object.entries(NUTRI)) {
+    const raw = pick(v, keys);
+    const m = raw != null && String(raw).match(/(\d+(?:[.,]\d+)?)/);
+    if (m) out[k] = Math.round(Number(m[1].replace(',', '.')) * 10) / 10;
+  }
+  return out.kcal != null ? JSON.stringify(out) : null;
+}
+
 // schema.org/Recipe o oggetto "simile" (export GZ con chiavi in italiano/inglese) -> bozza
 export function draftFromAny(o, fallbackUrl = null) {
   const notes = [
@@ -150,14 +174,18 @@ export function draftFromAny(o, fallbackUrl = null) {
   const cook = toMinutes(pick(o, ['cookTime', 'cottura', 'tempo_cottura', 'cook_time', 'cook_min']));
   if (prep == null && total != null && cook == null) prep = total;
   const url = pick(o, ['url', 'link', 'source_url', 'mainEntityOfPage']);
+  const title = strip(pick(o, ['name', 'nome', 'titolo', 'title', 'headline'])) || 'Ricetta senza titolo';
+  const category = tagsOf(pick(o, ['recipeCategory', 'categoria', 'category', 'portata']));
   return {
-    title: strip(pick(o, ['name', 'nome', 'titolo', 'title', 'headline'])) || 'Ricetta senza titolo',
+    title,
+    course: courseOf({ tags: category, title: '' })?.value || null,
+    nutrition: nutritionOf(pick(o, ['nutrition', 'valori_nutrizionali', 'nutrizione'])),
     servings: toServings(pick(o, ['recipeYield', 'porzioni', 'servings', 'dosi', 'yield', 'dosi_per'])) || 1,
     prep_min: prep,
     cook_min: cook,
     rest_min: toMinutes(pick(o, ['riposo', 'tempo_riposo', 'rest_min'])),
     difficulty: toDifficulty(pick(o, ['difficolta', 'difficoltà', 'difficulty'])),
-    tags: tagsOf(pick(o, ['recipeCategory', 'categoria', 'category']), pick(o, ['keywords', 'tag', 'tags'])),
+    tags: cleanTags(tagsOf(pick(o, ['keywords', 'tag', 'tags'])), title).join(', '),
     notes: notes.join('\n\n') || null,
     source_url: typeof url === 'string' ? url : typeof url === 'object' ? url?.['@id'] || fallbackUrl : fallbackUrl,
     photo_url: imageUrl(pick(o, ['image', 'foto', 'immagine', 'foto_principale', 'photo', 'img', 'thumbnailUrl'])),
@@ -175,7 +203,8 @@ export function draftFromAi(d, url = null) {
     cook_min: toMinutes(d?.cook_min),
     rest_min: toMinutes(d?.rest_min),
     difficulty: toDifficulty(d?.difficulty),
-    tags: tagsOf(d?.tags),
+    course: COURSES.includes(d?.course) ? d.course : null,
+    tags: cleanTags(tagsOf(d?.tags), d?.title).join(', '),
     notes: d?.notes ? strip(d.notes) : null,
     source_url: url,
     ingredients: (d?.ingredients || [])
@@ -239,7 +268,7 @@ export const normTitle = (s) =>
     .trim();
 
 // Righe da salvare per una bozza (ricetta + ingredienti collegati al catalogo + passaggi).
-export function draftToOps(draft, products) {
+export function draftToOps(draft, products, learned) {
   const rid = uuid();
   const ops = [
     {
@@ -252,6 +281,8 @@ export function draftToOps(draft, products) {
         cook_min: draft.cook_min ?? null,
         rest_min: draft.rest_min ?? null,
         difficulty: draft.difficulty || null,
+        course: draft.course || null,
+        nutrition: draft.nutrition || null,
         tags: draft.tags || null,
         diet_tags: joinList(parseList(draft.diet_tags)) || null,
         photo_key: draft.photo_key || null,
@@ -263,8 +294,7 @@ export function draftToOps(draft, products) {
     },
   ];
   draft.ingredients.forEach((i, n) => {
-    const p = matchProduct(i.text, products);
-    ops.push({ table: 'recipe_ingredients', row: { id: uuid(), recipe_id: rid, product_id: p?.id || null, text: i.text, qty: i.qty ?? null, unit: i.unit || null, optional: i.optional ? 1 : 0, grp: i.grp || null, sort: n } });
+    ops.push({ table: 'recipe_ingredients', row: { id: uuid(), recipe_id: rid, product_id: autoLink(i.text, products, learned), text: i.text, qty: i.qty ?? null, unit: i.unit || null, optional: i.optional ? 1 : 0, grp: i.grp || null, sort: n } });
   });
   draft.steps.forEach((s, n) => {
     ops.push({ table: 'recipe_steps', row: { id: uuid(), recipe_id: rid, text: s.text, timer_min: s.timer_min ?? null, photo_key: s.photo_key || null, sort: n } });
@@ -272,8 +302,8 @@ export function draftToOps(draft, products) {
   return { rid, ops };
 }
 
-export async function saveDrafts(drafts, products, label) {
-  const all = drafts.map((d) => draftToOps(d, products));
+export async function saveDrafts(drafts, products, label, learned) {
+  const all = drafts.map((d) => draftToOps(d, products, learned));
   const ops = all.flatMap((x) => x.ops);
   await save(ops, label);
   return all.map((x) => x.rid);

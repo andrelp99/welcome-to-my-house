@@ -4,7 +4,7 @@ import { useWakeLock } from '../hooks/useWakeLock.js';
 import { useData, showToast } from '../hooks/useData.js';
 import { Button, IconButton, Modal, Field, Input, Select, Stepper, ProductPicker, Empty } from '../components/ui/kit.jsx';
 import { put, save, undo } from '../db/repo.js';
-import { euro, fmtQty, todayISO, autoAddBelowStock, belowStock } from '../db/logic.js';
+import { euro, fmtQty, todayISO, autoAddBelowStock, belowStock, allowedLocation, autoExpiry } from '../db/logic.js';
 import { uuid } from '../db/db.js';
 import { readReceipt, normRaw, lineQty } from '../db/receipt.js';
 import { ProductForm } from '../components/forms.jsx';
@@ -275,7 +275,7 @@ function CheckIn({ data, items, initial, onClose }) {
       if (l.p && l.qty > 0)
         ops.push({
           table: 'stock_lots',
-          row: { product_id: l.p.id, qty: l.qty, unit: l.unit, location_id: l.location_id, expiry_date: l.expiry_date || null, frozen_at: l.location_id === 'loc-freezer' ? date : null, purchase_line_id: plid },
+          row: { product_id: l.p.id, qty: l.qty, unit: l.unit, location_id: l.location_id, expiry_date: l.expiry_date || autoExpiry(l.p, l.location_id, date) || null, frozen_at: l.location_id === 'loc-freezer' ? date : null, purchase_line_id: plid },
         });
       if (l.it) ops.push({ table: 'shopping_items', row: { id: l.it.id, deleted: 1 } });
       // memoria: la prossima volta questa riga di scontrino viene riconosciuta da sola
@@ -363,10 +363,10 @@ function CheckIn({ data, items, initial, onClose }) {
             {l.p && (
               <div className="grid grid-cols-2 gap-2">
                 <Select value={l.location_id} onChange={(e) => upd(i, 'location_id', e.target.value)}>
-                  {data.locationList.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                  {data.locationList.filter((x) => x.id === l.location_id || allowedLocation(l.p, x.id)).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
                 </Select>
                 {l.p.area === 'cibo' || l.location_id === 'loc-farmacia' ? (
-                  <Input type="date" value={l.expiry_date} onChange={(e) => upd(i, 'expiry_date', e.target.value)} aria-label="Scadenza" />
+                  <Input type="date" value={l.expiry_date || autoExpiry(l.p, l.location_id, date) || ''} onChange={(e) => upd(i, 'expiry_date', e.target.value)} aria-label="Scadenza" />
                 ) : <span />}
               </div>
             )}

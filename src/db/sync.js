@@ -15,7 +15,7 @@ export function subscribeSync(fn) {
   return () => listeners.delete(fn);
 }
 
-async function deviceId() {
+export async function deviceId() {
   let id = await getMeta('deviceId');
   if (!id) {
     const ua = navigator.userAgent;
@@ -67,14 +67,19 @@ async function doSync() {
       // Push: righe correnti di cio' che e' in coda (dedup per tabella+id).
       const queue = await db.outbox.orderBy('seq').limit(400).toArray();
       const maxSeq = queue.length ? queue[queue.length - 1].seq : 0;
-      const seen = new Set();
+      // per riga: operazione (etichetta) piu' recente in coda, per la cronologia condivisa
+      const meta = new Map();
+      for (const e of queue) {
+        const k = `${e.table}:${e.id}`;
+        const m = meta.get(k) || { table: e.table, id: e.id };
+        if (e.op) Object.assign(m, { op: e.op, label: e.label });
+        if (e.undoes) m.undoes = e.undoes;
+        meta.set(k, m);
+      }
       const changes = [];
-      for (const { table, id } of queue) {
-        const k = `${table}:${id}`;
-        if (seen.has(k)) continue;
-        seen.add(k);
-        const row = await db.table(table).get(id);
-        if (row) changes.push({ table, row });
+      for (const m of meta.values()) {
+        const row = await db.table(m.table).get(m.id);
+        if (row) changes.push({ table: m.table, row, op: m.op || null, label: m.label || null, undoes: m.undoes || null });
       }
       const since = await getMeta('cursor', -1);
 

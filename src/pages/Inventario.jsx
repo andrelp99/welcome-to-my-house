@@ -8,7 +8,7 @@ import { db } from '../db/db.js';
 import { depletion } from '../db/finance.js';
 import { Button, IconButton, Tabs, Stepper, ExpiryBadge, Empty, LEVEL_DOT } from '../components/ui/kit.jsx';
 import { LotForm, ProductForm, quickLotAction } from '../components/forms.jsx';
-import { lotStatus, LEVEL_ORDER, fmtQty, setTotalQty, minStock, stepFor, closeLot } from '../db/logic.js';
+import { lotStatus, LEVEL_ORDER, fmtQty, setTotalQty, minStock, stepForProduct, closeLot, qtyLabel, allowedLocation } from '../db/logic.js';
 
 export default function Inventario({ area, title, subtitle }) {
   const data = useData();
@@ -77,7 +77,7 @@ export default function Inventario({ area, title, subtitle }) {
           <IconButton label="Conta rapida" onClick={() => setCount((c) => !c)} className={count ? '!bg-brand !text-brand-on !border-brand' : ''}>
             <ListChecks size={18} />
           </IconButton>
-          <Button onClick={() => setModal({ kind: 'lot' })}>
+          <Button aria-label="Aggiungi" onClick={() => setModal({ kind: 'lot' })}>
             <Plus size={18} /> <span className="hidden sm:inline">Aggiungi</span>
           </Button>
         </div>
@@ -143,7 +143,7 @@ function ProductRow({ r, data, left, count, open, onToggle, setModal }) {
           </div>
           {!count && (
             <div className="text-xs text-text-muted">
-              {fmtQty(total)} {unit}
+              {qtyLabel(total, unit, p)}
               {lots.length > 1 ? ` · ${lots.length} lotti` : ''}
               {min != null ? ` · min ${fmtQty(min)}` : ''}
               {left != null && left <= 14 ? ` · finisce ~${left === 0 ? 'oggi' : `${left} gg`}` : ''}
@@ -155,7 +155,7 @@ function ProductRow({ r, data, left, count, open, onToggle, setModal }) {
         ) : (
           <>
             {worst.level !== 'none' && <ExpiryBadge status={worst} />}
-            <IconButton label={`Usa ${stepFor(unit)} ${unit}`} onClick={() => setTotalQty(p, Math.max(0, total - stepFor(unit)), data)}>
+            <IconButton label={`Usa ${fmtQty(Math.round(stepForProduct(p, unit) * 1000) / 1000)} ${unit}`} onClick={() => setTotalQty(p, Math.max(0, Math.round((total - stepForProduct(p, unit)) * 1000) / 1000), data)}>
               <Minus size={16} />
             </IconButton>
             <ChevronDown size={18} onClick={onToggle} className={`text-text-muted transition-transform cursor-pointer ${open ? 'rotate-180' : ''}`} />
@@ -171,7 +171,7 @@ function ProductRow({ r, data, left, count, open, onToggle, setModal }) {
               <div key={lot.id} className="flex items-center gap-2 rounded-md bg-bg-surface border border-bg-border px-3 py-2">
                 <div className="flex-1 min-w-0 text-sm">
                   <div className="font-semibold">
-                    {fmtQty(lot.qty)} {lot.unit} <span className="font-normal text-text-muted">· {loc?.name}</span>
+                    {qtyLabel(Number(lot.qty), lot.unit, p)} <span className="font-normal text-text-muted">· {loc?.name}</span>
                   </div>
                   <div className="text-xs text-text-muted">
                     {lot.expiry_date ? `scad. ${lot.expiry_date.split('-').reverse().join('/')}` : 'senza scadenza'}
@@ -183,7 +183,7 @@ function ProductRow({ r, data, left, count, open, onToggle, setModal }) {
                 {p.area === 'cibo' && !frozen && !lot.opened_at && (
                   <IconButton label="Aperto oggi" onClick={() => quickLotAction('open', lot, p)}><PackageOpen size={16} /></IconButton>
                 )}
-                {p.area === 'cibo' && (
+                {p.area === 'cibo' && (frozen || allowedLocation(p, 'loc-freezer')) && (
                   <IconButton label={frozen ? 'Scongela' : 'Congela'} onClick={() => quickLotAction(frozen ? 'thaw' : 'freeze', lot, p)}>
                     <Snowflake size={16} className={frozen ? 'text-brand' : ''} />
                   </IconButton>

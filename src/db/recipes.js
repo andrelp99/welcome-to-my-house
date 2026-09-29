@@ -36,10 +36,11 @@ const UNIT_ALIASES = {
   vasetto: ['vasetto', 'vasetti'],
   scatola: ['scatola', 'scatole'],
   lattina: ['lattina', 'lattine'],
+  uso: ['uso', 'usi'],
   'q.b.': ['q.b.', 'qb', 'q.b'],
 };
 const ALIAS = Object.fromEntries(Object.entries(UNIT_ALIASES).flatMap(([k, v]) => v.map((a) => [a, k])));
-export const RECIPE_UNITS = ['', 'g', 'kg', 'ml', 'l', 'pz', 'conf', 'cucchiaio', 'cucchiaino', 'spicchio', 'foglia', 'fetta', 'pizzico', 'q.b.'];
+export const RECIPE_UNITS = ['', 'g', 'kg', 'ml', 'l', 'pz', 'conf', 'uso', 'cucchiaio', 'cucchiaino', 'spicchio', 'foglia', 'fetta', 'pizzico', 'q.b.'];
 
 export function normUnit(u) {
   if (u == null) return '';
@@ -58,6 +59,17 @@ export function convert(qty, from, to) {
   if (f === t) return qty;
   if (BASE[f] && BASE[t] && BASE[f][0] === BASE[t][0]) return (qty * BASE[f][1]) / BASE[t][1];
   if (SPOON_ML[f] && BASE[t]?.[0] === 'v') return (qty * SPOON_ML[f]) / BASE[t][1];
+  return null;
+}
+
+// Quantita' di ricetta -> unita' del prodotto. Confezioni a usi: "2 dadi" / "1 bustina" / "2 uso" = usi.
+export function toProductUnit(qty, unit, p) {
+  if (qty == null || !p) return null;
+  const c = convert(qty, unit, p.default_unit);
+  if (c != null) return c;
+  const uses = p.default_unit === 'conf' && Number(p.uses_per_pack) > 0 ? Number(p.uses_per_pack) : null;
+  const u = normUnit(unit);
+  if (uses && !BASE[u] && !SPOON_ML[u] && u !== 'q.b.') return qty / uses;
   return null;
 }
 
@@ -126,7 +138,7 @@ const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
 // ── Match ingrediente -> prodotto del catalogo (regole semplici, senza AI) ──
 const STOP = new Set(['di', 'd', 'del', 'della', 'dello', 'dei', 'degli', 'delle', 'il', 'lo', 'la', 'i', 'gli', 'le', 'l', 'e', 'a', 'al', 'alla', 'con', 'per', 'in', 'da', 'fresco', 'fresca', 'freschi', 'fresche']);
-function tokens(s) {
+export function tokens(s) {
   return String(s || '')
     .toLowerCase()
     .normalize('NFD')
@@ -135,6 +147,36 @@ function tokens(s) {
     .split(' ')
     .filter((w) => w && !STOP.has(w))
     .map((w) => (w.length > 3 ? w.replace(/[aeio]$/, '') : w));
+}
+
+// Chiave di raggruppamento: "Rosmarino fresco" e "rosmarino" -> stessa chiave.
+export const ingKey = (text) => tokens(text).join(' ');
+
+// Ingrediente che non serve in dispensa (acqua, ghiaccio...): marcato cosi', non conta come "da collegare".
+export const NO_PRODUCT = 'no-product';
+
+// Memoria dei collegamenti gia' fatti: chiave testo -> prodotto piu' usato.
+export function learnedLinks(ingsByRecipe, products) {
+  const votes = {};
+  for (const list of Object.values(ingsByRecipe || {}))
+    for (const i of list) {
+      if (!i.product_id || (i.product_id !== NO_PRODUCT && !products[i.product_id])) continue;
+      const k = ingKey(i.text);
+      if (!k) continue;
+      const v = (votes[k] ||= {});
+      v[i.product_id] = (v[i.product_id] || 0) + 1;
+    }
+  const out = {};
+  for (const [k, v] of Object.entries(votes)) out[k] = Object.entries(v).sort((a, b) => b[1] - a[1])[0][0];
+  return out;
+}
+
+// Collegamento automatico: prima la memoria, poi le regole.
+export function autoLink(text, products, learned) {
+  const id = learned?.[ingKey(text)];
+  if (id === NO_PRODUCT) return NO_PRODUCT;
+  if (id && products[id]) return id;
+  return matchProduct(text, products)?.id || null;
 }
 
 export function matchProduct(text, products, { anyArea = false } = {}) {
@@ -171,12 +213,13 @@ export function stockIn(data, productId, unit) {
 
 // level: ok (ce l'ho) · low (poco) · missing (manca) · unlinked (non collegato al catalogo)
 export function ingredientStatus(ing, scale, data, subs) {
+  if (ing.product_id === NO_PRODUCT) return { level: 'free' };
   const p = ing.product_id && data.products[ing.product_id];
   if (!p) return { level: 'unlinked' };
   const unit = p.default_unit;
   const have = stockIn(data, p.id, unit);
   const vague = ing.qty == null || normUnit(ing.unit) === 'q.b.';
-  const need = vague ? null : convert(ing.qty * scale, ing.unit, unit);
+  const need = vague ? null : toProductUnit(ing.qty * scale, ing.unit, p);
   let level;
   if (have <= 0) level = 'missing';
   else if (need == null || have >= need - 1e-6) level = 'ok';
@@ -187,7 +230,7 @@ export function ingredientStatus(ing, scale, data, subs) {
       const sp = data.products[s.substitute_id];
       if (!sp) continue;
       const sHave = stockIn(data, sp.id, sp.default_unit);
-      const sNeed = vague ? null : convert(ing.qty * scale * (s.ratio || 1), ing.unit, sp.default_unit);
+      const sNeed = vague ? null : toProductUnit(ing.qty * scale * (s.ratio || 1), ing.unit, sp);
       if (sHave > 0 && (sNeed == null || sHave >= sNeed - 1e-6)) {
         res.sub = { ...s, product: sp, need: sNeed };
         break;
@@ -199,7 +242,7 @@ export function ingredientStatus(ing, scale, data, subs) {
 
 export function recipeStatus(ings, scale, data, subs) {
   const rows = ings.map((ing) => ({ ing, st: ingredientStatus(ing, scale, data, subs) }));
-  const req = rows.filter((r) => !r.ing.optional && r.st.level !== 'unlinked');
+  const req = rows.filter((r) => !r.ing.optional && r.st.level !== 'unlinked' && r.st.level !== 'free');
   const missing = req.filter((r) => (r.st.level === 'missing' || r.st.level === 'low') && !r.st.sub);
   return {
     rows,
@@ -243,7 +286,7 @@ export function suggestDiet(recipe, ings, data) {
   const out = [];
   const total = (Number(recipe.prep_min) || 0) + (Number(recipe.cook_min) || 0);
   if (recipe.prep_min != null && recipe.cook_min != null && total > 0 && total <= 30) out.push('veloce');
-  const req = ings.filter((i) => !i.optional);
+  const req = ings.filter((i) => !i.optional && i.product_id !== NO_PRODUCT);
   if (!req.length || req.some((i) => !data.products[i.product_id])) return out;
   const cats = new Set(req.map((i) => data.products[i.product_id].category_id));
   const has = (...c) => c.some((x) => cats.has(x));

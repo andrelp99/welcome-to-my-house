@@ -108,6 +108,21 @@ export function usePhoto(id) {
   return url;
 }
 
+// Backup: foto come data URL (locale o scaricata dal server).
+export async function photoToDataUrl(id) {
+  const b = await loadBlob(id);
+  return b ? blobToDataUrl(b) : null;
+}
+// Ripristino: rimette la foto in locale e la ricarica sul server se serve.
+export async function restorePhoto(id, dataUrl) {
+  if (!/^[A-Za-z0-9_-]{8,80}$/.test(id) || !String(dataUrl).startsWith('data:image/')) return false;
+  if ((await db.files.get(id))?.blob) return false;
+  const blob = await (await fetch(dataUrl)).blob();
+  await db.files.put({ id, blob, mime: blob.type || 'image/jpeg', uploaded: 0, at: Date.now() });
+  uploadPending();
+  return true;
+}
+
 // Cancella una foto (es. scontrino dopo il check-in): locale + server.
 export async function deletePhoto(id) {
   if (!id) return;

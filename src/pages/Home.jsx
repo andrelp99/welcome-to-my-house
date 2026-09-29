@@ -44,10 +44,10 @@ export default function Home() {
       ? rec.list
           .map((r) => {
             const ings = rec.ings[r.id] || [];
-            return { r, st: recipeStatus(ings, 1, data, rec.subs), urgent: ings.filter((i) => expiring.has(i.product_id)).length };
+            return { r, st: recipeStatus(ings, 1 / (r.servings || 1), data, rec.subs), urgent: ings.filter((i) => expiring.has(i.product_id)).length };
           })
           .filter((x) => x.st.feasible || x.st.missing === 1)
-          .sort((a, b) => b.st.feasible - a.st.feasible || b.urgent - a.urgent || (a.r.last_cooked_at || '').localeCompare(b.r.last_cooked_at || ''))
+          .sort((a, b) => b.urgent - a.urgent || b.st.feasible - a.st.feasible || (a.r.last_cooked_at || '').localeCompare(b.r.last_cooked_at || ''))
           .slice(0, 3)
       : [];
 
