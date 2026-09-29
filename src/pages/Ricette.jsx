@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { Plus, Search, Clock, Star, BookOpen, Download, Leaf, CalendarDays, Link2, ChevronRight } from 'lucide-react';
+import { Plus, Search, Clock, Star, BookOpen, Download, Leaf, CalendarDays, Link2, ChevronRight, Sparkles } from 'lucide-react';
 import { recipeSeason, monthName } from '../db/season.js';
 import { useData, useRecipes } from '../hooks/useData.js';
 import { Button, Tabs, Empty, Select } from '../components/ui/kit.jsx';
@@ -23,6 +23,7 @@ export default function Ricette() {
   const [fTime, setFTime] = useState('');
   const [fDiff, setFDiff] = useState('');
   const [sort, setSort] = useState('scade');
+  const [fTags, setFTags] = useState([]);
   const month = new Date().getMonth() + 1;
 
   const rows = useMemo(() => {
@@ -53,6 +54,7 @@ export default function Ricette() {
     if (fTime && TIMES.findIndex((x) => x.v === auto.time) > TIMES.findIndex((x) => x.v === fTime)) return false;
     if (fTime && !auto.time) return false;
     if (fDiff && auto.difficulty?.value !== fDiff) return false;
+    if (fTags.length && !fTags.every((t) => tags.includes(t))) return false;
     if (tab === 'ok' && !st.feasible) return false;
     if (tab === 'fav' && !r.favorite) return false;
     if (diet.length && !diet.every((t) => d.includes(t))) return false;
@@ -71,6 +73,10 @@ export default function Ricette() {
   };
   list.sort(SORTS[sort]);
   const unlinked = countUnlinked(rec, data);
+  const tagFreq = {};
+  for (const x of rows) for (const t of x.tags) tagFreq[t] = (tagFreq[t] || 0) + 1;
+  const topTags = Object.entries(tagFreq).filter(([, n]) => n > 1).sort((a, b) => b[1] - a[1]).slice(0, 16).map(([t]) => t);
+  const untagged = rows.filter((x) => x.tags.length < 2).length;
   const counts = { all: rows.length, ok: rows.filter((x) => x.st.feasible).length, fav: rows.filter((x) => x.r.favorite).length };
 
   return (
@@ -167,6 +173,22 @@ export default function Ricette() {
                 {t}
               </button>
             ))}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {[...new Set([...fTags, ...topTags])].map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setFTags((f) => (f.includes(t) ? f.filter((x) => x !== t) : [...f, t]))}
+                className={`rounded-full px-2.5 py-0.5 text-xs border ${fTags.includes(t) ? 'bg-brand text-brand-on border-brand' : 'border-bg-border text-text-secondary'}`}
+              >
+                #{t}
+              </button>
+            ))}
+            <Link to="/ricette/tag" className="inline-flex items-center gap-1 text-xs font-semibold text-brand">
+              <Sparkles size={12} /> {untagged ? `Tag con AI (${untagged} senza)` : 'Tag con AI'}
+            </Link>
           </div>
 
           {list.length === 0 ? (

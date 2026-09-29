@@ -24,7 +24,7 @@ export function planNeeds(entries, rec, data) {
       if (!p) continue;
       const cur = need.get(p.id) || { product: p, qty: 0, vague: false, recipes: new Set() };
       const vague = ing.qty == null || normUnit(ing.unit) === 'q.b.';
-      const q = vague ? null : toProductUnit(ing.qty * scale, ing.unit, p);
+      const q = vague ? (Number(p.uses_per_pack) > 0 ? scale / Number(p.uses_per_pack) : null) : toProductUnit(ing.qty * scale, ing.unit, p);
       if (q == null) cur.vague = true;
       else cur.qty += q;
       cur.recipes.add(r.title);

@@ -43,16 +43,34 @@ export function durationLabel(p, locId) {
   return k && set_(p?.[k]) ? `${p[k]} gg` : null;
 }
 
-// ── Confezioni con N usi (dado, bustine, vasetti...) ──
-export const usesOf = (p) => (p?.default_unit === 'conf' && Number(p.uses_per_pack) > 0 ? Number(p.uses_per_pack) : null);
+// ── Usi / porzioni per unita' (dado 10 per conf, pasta 12 per kg, pesto 3 per vasetto, parmigiano 20 per 100 g) ──
+// Salvati in products.uses_per_pack come usi per 1 unita' del prodotto; per g/ml si mostrano "per 100".
+export const useBase = (unit) => (unit === 'g' || unit === 'ml' ? 100 : 1);
+export const usesOf = (p) => (Number(p?.uses_per_pack) > 0 ? Number(p.uses_per_pack) : null);
+export const usesShown = (p) => (usesOf(p) ? Math.round(usesOf(p) * useBase(p.default_unit) * 100) / 100 : null);
+export const usesFromShown = (v, unit) => {
+  const n = Number(String(v ?? '').replace(',', '.'));
+  return v === '' || v == null || !(n > 0) ? null : n / useBase(unit);
+};
+export const usesUnitLabel = (unit) => (useBase(unit) === 100 ? `100 ${unit}` : unit || 'unità');
+// Categoria "a utilizzo" (salse, spezie...): i suoi prodotti vanno contati in usi.
+export const byUse = (p, categories) => !!categories?.[p?.category_id]?.by_use;
 // "2 conf · ~20 usi"
 export function qtyLabel(qty, unit, p) {
   const u = usesOf(p);
   const base = `${fmtQty(Math.round(qty * 1000) / 1000)} ${unit}`;
-  return u && unit === 'conf' ? `${base} · ~${fmtQty(Math.round(qty * u * 10) / 10)} usi` : base;
+  return u && unit === p.default_unit ? `${base} · ~${fmtQty(Math.round(qty * u * 10) / 10)} usi` : base;
 }
-// Passo del "-" in dispensa: 1 uso per le confezioni a usi.
-export const stepForProduct = (p, unit) => (usesOf(p) && unit === 'conf' ? 1 / usesOf(p) : stepFor(unit));
+// Usi fatti / rimasti di un lotto: le unita' iniziate (per eccesso) contano come piene.
+export function lotUses(qty, p) {
+  const u = usesOf(p);
+  if (!u) return null;
+  const units = Math.max(1, Math.ceil(Number(qty) - 1e-9));
+  const left = Math.round(Number(qty) * u * 10) / 10;
+  return { units, total: units * u, left, used: Math.max(0, Math.round((units * u - left) * 10) / 10) };
+}
+// Passo del "-" in dispensa: 1 uso se il prodotto ha gli usi.
+export const stepForProduct = (p, unit) => (usesOf(p) && unit === p.default_unit ? 1 / usesOf(p) : stepFor(unit));
 
 // Semaforo: scaduto (rosso) / in scadenza entro anticipo del luogo (giallo) / ok (verde) / senza data.
 export function lotStatus(lot, product, location) {

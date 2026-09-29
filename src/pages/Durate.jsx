@@ -6,7 +6,7 @@ import { Button, IconButton, Tabs, Empty } from '../components/ui/kit.jsx';
 import { apiFetch } from '../api/client.js';
 import { getMeta, setMeta } from '../db/db.js';
 import { save, undo } from '../db/repo.js';
-import { allowedLocation } from '../db/logic.js';
+import { allowedLocation, usesShown, usesFromShown, byUse } from '../db/logic.js';
 
 // Durate di conservazione per tanti prodotti insieme: l'AI propone, Andrea corregge e conferma.
 const AI_META = 'dur_ai'; // { product_id: { pantry_days, fridge_days, freezer_months, open_days, uses_per_pack } }
@@ -17,7 +17,7 @@ const FIELDS = [
   { k: 'open_shelf_days', ai: 'open_days', label: 'Aperto gg' },
 ];
 const has = (v) => v != null && v !== '';
-const empty = (p) => !has(p.pantry_days) && !has(p.fridge_days);
+const noDur = (p) => !has(p.pantry_days) && !has(p.fridge_days);
 const num = (v) => (v === '' || v == null ? null : Math.max(0, Math.round(Number(String(v).replace(',', '.')))) || null);
 
 export default function Durate() {
@@ -34,6 +34,8 @@ export default function Durate() {
     getMeta(AI_META, {}).then((v) => setAi(v || {}));
   }, []);
 
+  const [cats, setCats] = useState(null); // { id: by_use } modifiche in attesa di salvataggio
+  const [catBusy, setCatBusy] = useState(false);
   const products = useMemo(
     () => (data ? Object.values(data.products).filter((p) => p.area === 'cibo' && p.category_id !== 'cat-avanzi').sort((a, b) => a.name.localeCompare(b.name, 'it')) : []),
     [data]
@@ -47,13 +49,42 @@ export default function Durate() {
     if (!has(p[f.k]) && ai[p.id] && has(ai[p.id][f.ai])) return ai[p.id][f.ai];
     return p[f.k] ?? '';
   };
-  const usesVal = (p) => (edit[p.id] && 'uses_per_pack' in edit[p.id] ? edit[p.id].uses_per_pack : !has(p.uses_per_pack) && has(ai[p.id]?.uses_per_pack) ? ai[p.id].uses_per_pack : p.uses_per_pack ?? '');
+  const catByUse = (id) => (cats && id in cats ? cats[id] : !!data.categories[id]?.by_use);
+  const needsUses = (p) => catByUse(p.category_id) && !has(p.uses_per_pack);
+  const empty = (p) => noDur(p) || needsUses(p);
+  // usi mostrati per 100 g/ml o per unita' (vedi logic.js)
+  const usesVal = (p) => (edit[p.id] && 'uses_per_pack' in edit[p.id] ? edit[p.id].uses_per_pack : !has(p.uses_per_pack) && has(ai[p.id]?.uses_per_pack) ? ai[p.id].uses_per_pack : usesShown(p) ?? '');
+  const usesLabel = (p) => `Usi/${p.default_unit === 'g' || p.default_unit === 'ml' ? `100${p.default_unit}` : p.default_unit}`;
+  const foodCats = data.categoryList.filter((c) => c.area === 'cibo' && c.id !== 'cat-avanzi');
+  const catsDirty = cats && Object.entries(cats).some(([id, v]) => v !== !!data.categories[id]?.by_use);
+
+  async function askCats() {
+    setCatBusy(true);
+    setErr(null);
+    try {
+      const items = foodCats.map((c) => ({ id: c.id, name: c.name, examples: products.filter((p) => p.category_id === c.id).slice(0, 8).map((p) => p.name) }));
+      const res = await apiFetch('/api/ai/categories', { method: 'POST', body: JSON.stringify({ items }) });
+      setCats(Object.fromEntries(res.items.map((x) => [x.id, x.by_use])));
+    } catch (e) {
+      setErr(`AI non disponibile: ${e.message}`);
+    } finally {
+      setCatBusy(false);
+    }
+  }
+  async function saveCats() {
+    const ops = Object.entries(cats)
+      .filter(([id, v]) => v !== !!data.categories[id]?.by_use)
+      .map(([id, v]) => ({ table: 'categories', row: { id, by_use: v ? 1 : 0 } }));
+    if (ops.length) await save(ops, `Categorie a utilizzo (${ops.length})`);
+    setCats(null);
+    showToast('Categorie salvate', { label: 'Annulla', run: () => undo() });
+  }
   const proposed = (p, f) => !has(p[f.k]) && has(ai[p.id]?.[f.ai]) && !(edit[p.id] && f.k in edit[p.id]);
 
   const todo = products.filter(empty);
   const list = tab === 'todo' ? todo : products;
-  const toAsk = todo.filter((p) => !ai[p.id]);
   const withProposal = products.filter((p) => ai[p.id] && empty(p));
+  const toAskAll = products.filter((p) => empty(p) && !(ai[p.id] && (!needsUses(p) || has(ai[p.id].uses_per_pack))));
 
   function setField(p, k, v) {
     setEdit((e) => ({ ...e, [p.id]: { ...e[p.id], [k]: v } }));
@@ -69,6 +100,7 @@ export default function Durate() {
     setErr(null);
     const next = { ...ai };
     try {
+      const toAsk = toAskAll;
       for (let i = 0; i < toAsk.length; i += 30) {
         setBusy({ done: i, total: toAsk.length });
         const part = toAsk.slice(i, i + 30);
@@ -95,7 +127,7 @@ export default function Durate() {
       if (!sel.has(p.id)) continue;
       const row = { id: p.id };
       for (const f of FIELDS) row[f.k] = num(value(p, f));
-      if (p.default_unit === 'conf') row.uses_per_pack = num(usesVal(p));
+      row.uses_per_pack = usesFromShown(usesVal(p), p.default_unit);
       if (!allowedLocation({ ...p, ...row }, p.default_location_id)) row.default_location_id = ['loc-dispensa', 'loc-frigo', 'loc-freezer'].find((l) => allowedLocation({ ...p, ...row }, l)) || 'loc-altro';
       ops.push({ table: 'products', row });
     }
@@ -115,8 +147,37 @@ export default function Durate() {
           <ArrowLeft size={18} />
         </IconButton>
         <div>
-          <h1 className="text-2xl font-bold leading-tight">Durate prodotti</h1>
-          <p className="text-text-secondary text-sm">{todo.length} prodotti cibo senza durate (dispensa o frigo).</p>
+          <h1 className="text-2xl font-bold leading-tight">Durate e porzioni</h1>
+          <p className="text-text-secondary text-sm">{todo.length} prodotti da completare (durate, o usi per le categorie a utilizzo).</p>
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-bg-border bg-bg-surface p-4 space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="font-bold">Categorie a utilizzo</h2>
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={askCats} disabled={catBusy}>
+              {catBusy ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />} AI
+            </Button>
+            {catsDirty && <Button onClick={saveCats}>Salva</Button>}
+          </div>
+        </div>
+        <p className="text-sm text-text-secondary">Si consumano a usi (spezie, salse…): i loro prodotti devono avere gli usi; “q.b.” nelle ricette = 1 uso.</p>
+        <div className="flex flex-wrap gap-2">
+          {foodCats.map((c) => {
+            const on = catByUse(c.id);
+            const changed = cats && c.id in cats && cats[c.id] !== !!c.by_use;
+            return (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => setCats((x) => ({ ...(x || {}), [c.id]: !on }))}
+                className={`rounded-full border px-3 py-1.5 text-sm ${on ? 'bg-brand text-brand-on border-brand' : 'border-bg-border bg-bg-elevated'} ${changed ? 'ring-2 ring-warning' : ''}`}
+              >
+                {c.name}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -125,9 +186,9 @@ export default function Durate() {
           Giorni da quando entra in casa (confezione chiusa), mesi in freezer, giorni da aperto. Vuoto = lì non ci va. Le proposte AI sono in <span className="text-brand">giallo</span>: correggi e conferma.
         </p>
         <div className="flex flex-wrap gap-2">
-          <Button variant="ghost" onClick={askAi} disabled={!!busy || !toAsk.length}>
+          <Button variant="ghost" onClick={askAi} disabled={!!busy || !toAskAll.length}>
             {busy ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-            {busy ? `AI… ${busy.done}/${busy.total}` : `Proponi con AI (${toAsk.length})`}
+            {busy ? `AI… ${busy.done}/${busy.total}` : `Proponi con AI (${toAskAll.length})`}
           </Button>
           <Button onClick={confirm} disabled={!sel.size}>
             <CheckCheck size={16} /> Conferma selezionati ({sel.size})
@@ -157,19 +218,17 @@ export default function Durate() {
                 <span className="font-semibold flex-1 truncate">{p.name}</span>
                 <span className="text-xs text-text-muted shrink-0">{data.categories[p.category_id]?.name} · {p.default_unit}</span>
               </label>
-              <div className={`grid gap-2 ${p.default_unit === 'conf' ? 'grid-cols-5' : 'grid-cols-4'}`}>
+              <div className="grid gap-2 grid-cols-5">
                 {FIELDS.map((f) => (
                   <label key={f.k} className="text-[11px] text-text-muted space-y-0.5">
                     <span className="block truncate">{f.label}</span>
                     <input inputMode="numeric" className={inputCls(proposed(p, f))} value={value(p, f)} placeholder="—" onChange={(e) => setField(p, f.k, e.target.value)} />
                   </label>
                 ))}
-                {p.default_unit === 'conf' && (
-                  <label className="text-[11px] text-text-muted space-y-0.5">
-                    <span className="block truncate">Usi/conf</span>
-                    <input inputMode="decimal" className={inputCls(!has(p.uses_per_pack) && has(ai[p.id]?.uses_per_pack) && !(edit[p.id] && 'uses_per_pack' in edit[p.id]))} value={usesVal(p)} placeholder="—" onChange={(e) => setField(p, 'uses_per_pack', e.target.value)} />
-                  </label>
-                )}
+                <label className={`text-[11px] space-y-0.5 ${needsUses(p) && !has(usesVal(p)) ? 'text-negative' : 'text-text-muted'}`}>
+                  <span className="block truncate">{usesLabel(p)}</span>
+                  <input inputMode="decimal" className={`${inputCls(!has(p.uses_per_pack) && has(ai[p.id]?.uses_per_pack) && !(edit[p.id] && 'uses_per_pack' in edit[p.id]))} ${needsUses(p) && !has(usesVal(p)) ? '!border-negative' : ''}`} value={usesVal(p)} placeholder="—" onChange={(e) => setField(p, 'uses_per_pack', e.target.value)} />
+                </label>
               </div>
             </li>
           ))}

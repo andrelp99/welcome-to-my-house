@@ -15,7 +15,7 @@ export function expiringSet(data) {
 // Ingredienti della ricetta che usano prodotti in scadenza (nomi).
 export function urgentOf(ings, exp, data) {
   const names = [];
-  for (const i of ings) if (i.product_id && exp.has(i.product_id)) names.push(data.products[i.product_id]?.name || i.text);
+  for (const i of ings) if (!i.optional && i.product_id && exp.has(i.product_id)) names.push(data.products[i.product_id]?.name || i.text);
   return [...new Set(names)];
 }
 

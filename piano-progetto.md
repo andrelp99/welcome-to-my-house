@@ -1,12 +1,11 @@
-# Welcome to My House — decisioni e stato (agg. 2026-09-29)
+# Welcome to My House — decisioni e stato (agg. 2026-09-29, 0.10)
 
 Doc completo: https://claude.ai/code/artifact/90dba295-701b-4040-81e0-b78035e877ec
 
 ## Stato
 - F0, F1 chiuse. F2–F5 in produzione (verifica in corso). 145 ricette GZ importate.
-- 0.7.0 Collega ingredienti + 0.8.0 durate/confezioni/tag/colori + 0.9.0 durate AI, costo porzione, nutrizione, prima ciò che scade, annulla ovunque, foto nel backup: file nella cartella, da deployare.
-- Versione app: 0.9.0. Migrazioni nuove 0006 + 0007 (da applicare in remoto PRIMA del push).
-- Migrazioni applicate in remoto: 0001 … 0005.
+- 0.7–0.9 in produzione (migrazioni remote 0001 … 0007).
+- 0.10.0 (usi per unità, usi fatti, categorie a utilizzo, alternative stessa categoria, superflui, tag AI): file nella cartella, da deployare. Migrazione nuova 0008 PRIMA del push.
 
 ## Verifiche aperte (Andrea)
 - F2: 10 ricette caricate e cucinate
@@ -16,6 +15,10 @@ Doc completo: https://claude.ai/code/artifact/90dba295-701b-4040-81e0-b78035e877
 - 0.9.0: Catalogo → Durate → Proponi con AI → conferma; Importa → File GZ → Aggiorna (nutrizione); prova annulla da un altro dispositivo; backup con foto
 - 0.8.0: impostare durate (dispensa/frigo/freezer) e usi per confezione sui prodotti usati; controllare portata/difficoltà auto
 - Collega: 451 ingredienti GZ (230 diversi) da collegare con AI → rivedere proposte (unità/categoria prodotti nuovi)
+
+## Verifiche 0.10
+- Durate e porzioni → Categorie a utilizzo (AI → Salva) → Proponi con AI → Conferma
+- Ricette → Tag con AI → Conferma; segnare superflui dove serve
 
 ## Residui / da fare
 - Nessun residuo tecnico aperto. Cronologia condivisa solo da 0.9 in poi

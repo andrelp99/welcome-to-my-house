@@ -79,7 +79,7 @@ worker/ai.ts           interfaccia AI unica (ricetta, scontrino) con modello di 
 worker/importer.ts     import da link (JSON-LD schema.org) e copia foto remote in D1
 worker/webpush.ts      Web Push: VAPID ES256 + cifratura aes128gcm
 worker/digest.ts       contenuti notifiche: scadenze, riepilogo settimana, report mensile
-migrations/            schema D1: 0001_init … 0007_nutrizione_annulla
+migrations/            schema D1: 0001_init … 0008_categorie_a_uso
 src/db/                Dexie, sync, logica dispensa, ricette, import, collega ingredienti, scontrino, planner, stagionalità, finanze, foto, push
 src/pages/             Home, Casa/Dispensa (Inventario), Spesa, Ricette (+ dettaglio, editor, import, cucina), Planner, Finanze, Catalogo, Impostazioni
 src/components/        ui/ (kit, layout, card), forms, recipes, charts
@@ -192,3 +192,13 @@ Foto in D1 (non R2): nessun bucket da creare, limite free 5 GB ampiamente suffic
 - **Annulla da ogni dispositivo**: ogni operazione con etichetta ha un `op` (outbox → `/api/sync` → `change_log.op_id/label`). `GET /api/ops` = ultime operazioni di tutti i dispositivi; `POST /api/undo {op, force}` ripristina lo stato "prima" (409 se righe cambiate dopo: si conferma con "Annulla comunque"). L'annulla locale (toast) marca l'operazione come annullata anche sul server (`undoes`).
 - **Foto nel backup**: Esporta JSON (versione 2) include le foto di ricette, passaggi e scontrini come data URL (toggle). Il ripristino le rimette in locale e le ricarica sul server.
 - Migrazione `0007_nutrizione_annulla.sql`: va applicata PRIMA del push, insieme alla 0006.
+
+## Usi, superflui, tag AI (0.10.0)
+
+- **Porzioni/usi per unità** per ogni prodotto (`products.uses_per_pack` = usi per 1 unità; per g/ml si mostra e si chiede "per 100 g/ml"). Dispensa: "0,5 kg · ~6 usi", il "−" toglie 1 uso. Ricette: "2 porzioni/dosi/usi" = usi; "q.b." di un prodotto a usi = 1 uso per ricetta intera.
+- **Usi già fatti**: modifica lotto → "Usi già fatti" (unità iniziate contano piene: 1,3 conf da 10 usi = 13 rimasti su 20) → cambia la quantità del lotto.
+- **Categorie a utilizzo** (`categories.by_use`, migrazione 0008): Catalogo → Durate e porzioni → "Categorie a utilizzo" (AI + tocco per cambiare → Salva). I prodotti di queste categorie senza usi finiscono tra i "da completare"; `POST /api/ai/durations` propone gli usi per tutti.
+- **Alternative / sostituti**: il selettore propone prima i prodotti della stessa categoria (`ProductPicker prefer`).
+- **Ingredienti superflui**: nel dettaglio ricetta, icona occhio su ogni ingrediente (= `optional`). Grigio, non conta come presente/mancante, non va in lista, non si scala con "Ho cucinato", fuori da costo, scadenze e "Collega".
+- **Tag con AI**: `/ricette/tag`, `POST /api/ai/tags` (15 ricette per chiamata): ingrediente principale, cottura, occasione, carattere, cucina (+ portata se manca). Tocca un tag per scartarlo, poi Conferma. Proposte in `meta.tag_ai`. Nel ricettario: filtro per tag (i più usati) e link "Tag con AI".
+- Migrazione `0008_categorie_a_uso.sql`: PRIMA del push.

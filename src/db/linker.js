@@ -45,7 +45,7 @@ export function unlinkedGroups(rec, data, ai = {}) {
   const groups = new Map();
   for (const r of rec.list) {
     for (const i of rec.ings[r.id] || []) {
-      if (i.product_id === NO_PRODUCT || (i.product_id && data.products[i.product_id])) continue;
+      if (i.optional || i.product_id === NO_PRODUCT || (i.product_id && data.products[i.product_id])) continue;
       const key = ingKey(i.text) || i.text.toLowerCase();
       const g = groups.get(key) || { key, ings: [], recipes: new Map(), texts: {} };
       g.ings.push(i);
@@ -144,6 +144,6 @@ export async function applyLinks(choices, label) {
 // Quanti ingredienti restano da collegare (per il banner nel ricettario).
 export function countUnlinked(rec, data) {
   let n = 0;
-  for (const r of rec.list) for (const i of rec.ings[r.id] || []) if (i.product_id !== NO_PRODUCT && !(i.product_id && data.products[i.product_id])) n++;
+  for (const r of rec.list) for (const i of rec.ings[r.id] || []) if (!i.optional && i.product_id !== NO_PRODUCT && !(i.product_id && data.products[i.product_id])) n++;
   return n;
 }

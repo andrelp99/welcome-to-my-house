@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { ChefHat, Camera, ImagePlus, X, Check, AlertTriangle, XCircle, HelpCircle, Repeat, Trash2, Plus, MinusCircle, Ban } from 'lucide-react';
+import { ChefHat, Camera, ImagePlus, X, Check, AlertTriangle, XCircle, HelpCircle, Repeat, Trash2, Plus, MinusCircle, Ban, EyeOff, Eye } from 'lucide-react';
 import { usePhoto, addPhoto } from '../db/photos.js';
 import { Modal, Field, Input, Select, Button, IconButton, Stepper, ProductPicker, Empty } from './ui/kit.jsx';
 import { fmtAmount, cookRecipe, proposedUses } from '../db/recipes.js';
@@ -65,7 +65,8 @@ export const STATUS_UI = {
 };
 
 // Lista ingredienti con stato dispensa, raggruppata per "grp".
-export function IngredientList({ rows, scale, onLink }) {
+// onOptional(ing): segna/toglie "superfluo" (non conta come presente/mancante, non va in lista, non si scala).
+export function IngredientList({ rows, scale, onLink, onOptional }) {
   let grp = null;
   const out = [];
   for (const { ing, st } of rows) {
@@ -73,8 +74,9 @@ export function IngredientList({ rows, scale, onLink }) {
       grp = ing.grp || null;
       if (grp) out.push(<li key={`g-${ing.id}`} className="pt-3 pb-1 text-xs uppercase tracking-wider font-semibold text-text-muted">{grp}</li>);
     }
-    const ui = st.sub ? { icon: Repeat, cls: 'text-warning', label: 'sostituto' } : STATUS_UI[st.level];
-    const nameCls = st.sub ? 'text-warning' : st.level === 'ok' ? 'text-positive' : st.level === 'missing' || st.level === 'low' ? 'text-negative' : '';
+    const extra = !!ing.optional;
+    const ui = extra ? { icon: MinusCircle, cls: 'text-text-muted', label: 'superfluo' } : st.sub ? { icon: Repeat, cls: 'text-warning', label: 'sostituto' } : STATUS_UI[st.level];
+    const nameCls = extra ? 'text-text-muted' : st.sub ? 'text-warning' : st.level === 'ok' ? 'text-positive' : st.level === 'missing' || st.level === 'low' ? 'text-negative' : '';
     const Icon = ui.icon;
     const amount = ing.qty != null || ing.unit ? fmtAmount(ing.qty != null ? ing.qty * scale : null, ing.unit) : '';
     out.push(
@@ -82,14 +84,16 @@ export function IngredientList({ rows, scale, onLink }) {
         <Icon size={18} className={`mt-0.5 shrink-0 ${ui.cls}`} aria-label={ui.label} />
         <div className="flex-1 min-w-0">
           <div className="flex justify-between gap-2">
-            <span className={`${nameCls} ${ing.optional ? 'opacity-70' : ''}`}>
+            <span className={nameCls}>
               {ing.text}
-              {ing.optional ? <span className="text-text-muted text-xs"> · facoltativo</span> : null}
+              {extra ? <span className="text-text-muted text-xs"> · superfluo</span> : null}
             </span>
             <span className="font-semibold tabular-nums shrink-0">{amount}</span>
           </div>
           <div className="text-xs text-text-muted">
-            {st.level === 'free' ? (
+            {extra ? (
+              'non conta: né presente né mancante'
+            ) : st.level === 'free' ? (
               'non serve in dispensa'
             ) : st.level === 'unlinked' ? (
               onLink ? (
@@ -104,6 +108,11 @@ export function IngredientList({ rows, scale, onLink }) {
             )}
           </div>
         </div>
+        {onOptional && (
+          <button type="button" className="print:hidden shrink-0 p-1 text-text-muted hover:text-text-primary" aria-label={extra ? 'Conta di nuovo' : 'Segna superfluo'} title={extra ? 'Conta di nuovo' : 'Superfluo: non contarlo'} onClick={() => onOptional(ing)}>
+            {extra ? <Eye size={16} /> : <EyeOff size={16} />}
+          </button>
+        )}
       </li>
     );
   }
@@ -242,7 +251,7 @@ export function SubstitutionsPanel({ data, rec }) {
           </Field>
           {adding.from && (
             <Field label={`Usa${adding.to ? `: ${adding.to.name}` : ''}`}>
-              {!adding.to && <ProductPicker products={data.products} area="cibo" onPick={(p) => setAdding((a) => ({ ...a, to: p }))} />}
+              {!adding.to && <ProductPicker products={data.products} area="cibo" prefer={adding.from.category_id} onPick={(p) => setAdding((a) => ({ ...a, to: p }))} />}
             </Field>
           )}
           {adding.to && (

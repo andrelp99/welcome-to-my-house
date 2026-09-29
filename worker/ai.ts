@@ -60,8 +60,25 @@ Regole:
 - fridge_days = giorni in frigo; null se in frigo non ha senso (pasta secca, farina, zucchero, scatolame chiuso, spezie).
 - freezer_months = mesi in freezer; null se non si congela bene (uova intere, insalata, latte UHT, pasta secca, scatolame).
 - open_days = giorni dopo l'apertura della confezione (in frigo se serve); null se non cambia (spezie, sale, pasta secca).
-- uses_per_pack solo se l'unita' e' "conf" e il prodotto si usa a dosi tipiche (dado 10, bustine lievito 3, vasetto pesto 3, panna 2...), altrimenti null.
+- uses_per_pack = porzioni/usi tipici per UNITA' del prodotto: per unita' g o ml indica gli usi per 100 g/ml (parmigiano 100 g = 10 usi, olio 100 ml = 7 usi); per kg/l per 1 kg/l (pasta 1 kg = 12 porzioni, latte 1 l = 5 usi); per pz/conf per 1 pezzo/confezione (dado 10, bustine lievito 3, vasetto pesto 3, uova 1 pz = 1).
+  Obbligatorio per spezie, erbe, salse, condimenti, dadi, lievito, sale, zucchero (si usano a dosi); per il resto indicalo se sensato, altrimenti null.
 - Valori prudenti, numeri interi, un elemento per ogni prodotto con lo stesso "n". Non inventare prodotti.`,
+
+  categories: `Sei un assistente per la gestione di una dispensa di casa italiana.
+Ricevi categorie di prodotti alimentari (id, nome, esempi di prodotti).
+Decidi se ogni categoria e' "a utilizzo": i suoi prodotti si consumano a piccole dosi/usi ripetuti da una confezione (spezie, sale, salse, condimenti, olio, aceto, dadi, lievito, caffe'...) invece che a quantita' intere pesate per ricetta (carne, pasta, verdura, frutta, latte...).
+Rispondi SOLO con JSON valido: { "items": [{"id": string, "by_use": boolean}] } con un elemento per ogni categoria ricevuta.`,
+
+  tags: `Sei un assistente che classifica ricette italiane con tag utili per scegliere cosa cucinare.
+Ricevi ricette numerate (titolo, portata, tempo, ingredienti principali).
+Per ciascuna scegli da 3 a 7 tag brevi, minuscoli, in italiano, tra questi gruppi:
+- ingrediente principale: pollo, manzo, maiale, vitello, agnello, pesce, crostacei, molluschi, uova, formaggi, legumi, verdure, funghi, patate, pasta, riso, cereali
+- cottura: al forno, in padella, alla griglia, fritto, bollito, al vapore, in umido, crudo, slow cooking
+- occasione: tutti i giorni, cena con ospiti, festa, schiscetta, meal prep, estate, inverno
+- carattere: leggero, sostanzioso, piccante, comfort food, economico, per bambini
+- cucina: tradizionale, regionale, etnica (o la regione/paese se chiaro, es. "siciliana", "indiana")
+Rispondi SOLO con JSON valido: { "items": [{"n": number, "tags": string[], "course": "Antipasto"|"Primo"|"Secondo"|"Contorno"|"Piatto unico"|"Dolce"|"Salsa e sugo"|"Pane e lievitati"|"Colazione"|"Bevanda"|null}] }
+Un elemento per ogni ricetta con lo stesso "n". Non ripetere la portata nei tag. Non inventare ingredienti.`,
 } as const;
 
 export type ExtractKind = keyof typeof PROMPTS;

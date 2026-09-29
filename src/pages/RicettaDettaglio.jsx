@@ -167,7 +167,7 @@ export default function RicettaDettaglio() {
           {urgent.length > 0 && (
             <p className="mb-2 rounded-md bg-warning/10 border border-warning/40 px-3 py-2 text-sm text-warning">Usa prima: {urgent.join(', ')} (in scadenza).</p>
           )}
-          {ings.length ? <IngredientList rows={status.rows} scale={scale} onLink={setLinking} /> : <p className="text-sm text-text-muted">Nessun ingrediente.</p>}
+          {ings.length ? <IngredientList rows={status.rows} scale={scale} onLink={setLinking} onOptional={(ing) => put('recipe_ingredients', { id: ing.id, optional: ing.optional ? 0 : 1 }, `${ing.text}: ${ing.optional ? 'conta di nuovo' : 'superfluo'}`)} /> : <p className="text-sm text-text-muted">Nessun ingrediente.</p>}
           {(cost.known > 0 || cost.unknown.length > 0) && (
             <div className="mt-3 pt-3 border-t border-bg-border text-sm">
               <div className="flex justify-between gap-2">

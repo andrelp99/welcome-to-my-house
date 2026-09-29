@@ -67,7 +67,7 @@ export function cleanTags(tags, title) {
   const t = low(title).trim();
   return parseList(tags).filter((x) => {
     const s = low(x);
-    if (JUNK.has(s) || s === t || (t && t.includes(s) && s.split(' ').length > 1)) return false;
+    if (JUNK.has(s) || s === t || (t && t.includes(s) && s.split(' ').length > 2)) return false;
     return !COURSE_RULES.some(([re]) => re.test(s) && /piatti|^antipasti$|^contorni$|^dolci$|^salse/.test(s));
   });
 }

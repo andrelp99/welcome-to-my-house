@@ -15,6 +15,7 @@ import Planner from './pages/Planner.jsx';
 import Finanze from './pages/Finanze.jsx';
 import Collega from './pages/Collega.jsx';
 import Durate from './pages/Durate.jsx';
+import TagAI from './pages/TagAI.jsx';
 
 export default function App() {
   return (
@@ -32,6 +33,7 @@ export default function App() {
         <Route path="ricette/nuova" element={<RicettaForm key="nuova" />} />
         <Route path="ricette/importa" element={<RicettaImport />} />
         <Route path="ricette/collega" element={<Collega />} />
+        <Route path="ricette/tag" element={<TagAI />} />
         <Route path="planner" element={<Planner />} />
         <Route path="ricette/:id" element={<RicettaDettaglio />} />
         <Route path="ricette/:id/modifica" element={<RicettaForm key="modifica" />} />

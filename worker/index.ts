@@ -195,8 +195,47 @@ app.post('/ai/durations', async (c) => {
         fridge_days: int(r.fridge_days, 365),
         freezer_months: int(r.freezer_months, 24),
         open_days: int(r.open_days, 730),
-        uses_per_pack: x.unit === 'conf' ? int(r.uses_per_pack, 100) : null,
+        uses_per_pack: (() => {
+          const n = Number(r.uses_per_pack);
+          return Number.isFinite(n) && n > 0 ? Math.min(Math.round(n * 10) / 10, 1000) : null;
+        })(),
       };
+    });
+    return c.json({ model, items: out });
+  } catch (e) {
+    return c.json({ error: `AI: ${(e as Error).message}` }, 502);
+  }
+});
+
+// Categorie "a utilizzo" (spezie, salse...): proposta AI, conferma in app.
+app.post('/ai/categories', async (c) => {
+  const body = await c.req.json<{ items?: { id?: string; name?: string; examples?: string[] }[] }>().catch(() => null);
+  const items = (body?.items || []).slice(0, 60).map((x) => ({ id: String(x?.id || '').slice(0, 40), name: String(x?.name || '').slice(0, 60), examples: (x?.examples || []).slice(0, 8).map((e) => String(e).slice(0, 40)) }));
+  if (!items.length) return c.json({ error: 'Nessuna categoria' }, 400);
+  const text = items.map((x) => `- ${x.id}: ${x.name} (es. ${x.examples.join(', ') || '—'})`).join('\n');
+  try {
+    const { model, data } = await extract(c.env, 'categories', { text });
+    const raw = Array.isArray((data as any)?.items) ? (data as any).items : [];
+    return c.json({ model, items: items.map((x) => ({ id: x.id, by_use: !!raw.find((r: any) => r?.id === x.id)?.by_use })) });
+  } catch (e) {
+    return c.json({ error: `AI: ${(e as Error).message}` }, 502);
+  }
+});
+
+// Tag ricette (max 15 per chiamata): ingrediente principale, cottura, occasione, carattere, cucina.
+app.post('/ai/tags', async (c) => {
+  const body = await c.req.json<{ items?: { title?: string; course?: string; minutes?: number; ingredients?: string[] }[] }>().catch(() => null);
+  const items = (body?.items || []).slice(0, 15).map((x) => ({ title: String(x?.title || '').slice(0, 100), course: String(x?.course || '').slice(0, 30), minutes: Number(x?.minutes) || null, ingredients: (x?.ingredients || []).slice(0, 15).map((i) => String(i).slice(0, 40)) }));
+  if (!items.length || items.some((x) => !x.title)) return c.json({ error: 'Nessuna ricetta' }, 400);
+  const text = items.map((x, n) => `${n + 1}. ${x.title} | portata: ${x.course || '—'} | tempo: ${x.minutes ? `${x.minutes} min` : '—'} | ingredienti: ${x.ingredients.join(', ')}`).join('\n');
+  const COURSES = ['Antipasto', 'Primo', 'Secondo', 'Contorno', 'Piatto unico', 'Dolce', 'Salsa e sugo', 'Pane e lievitati', 'Colazione', 'Bevanda'];
+  try {
+    const { model, data } = await extract(c.env, 'tags', { text });
+    const raw = Array.isArray((data as any)?.items) ? (data as any).items : [];
+    const out = items.map((x, i) => {
+      const r = raw.find((y: any) => Number(y?.n) === i + 1) || raw[i] || {};
+      const tags = [...new Set((Array.isArray(r.tags) ? r.tags : []).map((t: unknown) => String(t).toLowerCase().trim().slice(0, 30)).filter(Boolean))].slice(0, 8);
+      return { title: x.title, tags, course: COURSES.includes(r.course) ? r.course : null };
     });
     return c.json({ model, items: out });
   } catch (e) {

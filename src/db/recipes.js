@@ -36,7 +36,7 @@ const UNIT_ALIASES = {
   vasetto: ['vasetto', 'vasetti'],
   scatola: ['scatola', 'scatole'],
   lattina: ['lattina', 'lattine'],
-  uso: ['uso', 'usi'],
+  uso: ['uso', 'usi', 'porzione', 'porzioni', 'dose', 'dosi'],
   'q.b.': ['q.b.', 'qb', 'q.b'],
 };
 const ALIAS = Object.fromEntries(Object.entries(UNIT_ALIASES).flatMap(([k, v]) => v.map((a) => [a, k])));
@@ -67,7 +67,7 @@ export function toProductUnit(qty, unit, p) {
   if (qty == null || !p) return null;
   const c = convert(qty, unit, p.default_unit);
   if (c != null) return c;
-  const uses = p.default_unit === 'conf' && Number(p.uses_per_pack) > 0 ? Number(p.uses_per_pack) : null;
+  const uses = Number(p.uses_per_pack) > 0 ? Number(p.uses_per_pack) : null;
   const u = normUnit(unit);
   if (uses && !BASE[u] && !SPOON_ML[u] && u !== 'q.b.') return qty / uses;
   return null;
@@ -219,7 +219,9 @@ export function ingredientStatus(ing, scale, data, subs) {
   const unit = p.default_unit;
   const have = stockIn(data, p.id, unit);
   const vague = ing.qty == null || normUnit(ing.unit) === 'q.b.';
-  const need = vague ? null : toProductUnit(ing.qty * scale, ing.unit, p);
+  // q.b. di un prodotto a usi (spezie, salse): 1 uso per ricetta intera
+  const uses = Number(p.uses_per_pack) > 0 ? Number(p.uses_per_pack) : null;
+  const need = vague ? (uses ? scale / uses : null) : toProductUnit(ing.qty * scale, ing.unit, p);
   let level;
   if (have <= 0) level = 'missing';
   else if (need == null || have >= need - 1e-6) level = 'ok';
@@ -230,7 +232,7 @@ export function ingredientStatus(ing, scale, data, subs) {
       const sp = data.products[s.substitute_id];
       if (!sp) continue;
       const sHave = stockIn(data, sp.id, sp.default_unit);
-      const sNeed = vague ? null : toProductUnit(ing.qty * scale * (s.ratio || 1), ing.unit, sp);
+      const sNeed = vague ? (Number(sp.uses_per_pack) > 0 ? (scale * (s.ratio || 1)) / Number(sp.uses_per_pack) : null) : toProductUnit(ing.qty * scale * (s.ratio || 1), ing.unit, sp);
       if (sHave > 0 && (sNeed == null || sHave >= sNeed - 1e-6)) {
         res.sub = { ...s, product: sp, need: sNeed };
         break;
@@ -386,7 +388,7 @@ export function proposedUses(status) {
   const map = new Map();
   for (const { ing, st } of status.rows) {
     const src = st.level !== 'ok' && st.sub ? { product: st.sub.product, need: st.sub.need } : st.product ? { product: st.product, need: st.need } : null;
-    if (!src || (ing.optional && st.level !== 'ok')) continue;
+    if (!src || ing.optional) continue; // superfluo: non si scala
     if (!st.sub && !(st.have > 0)) continue; // niente in casa: niente da scalare
     const cur = map.get(src.product.id) || { product: src.product, qty: 0, known: true, label: [] };
     if (src.need == null) cur.known = cur.qty > 0;

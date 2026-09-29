@@ -3,7 +3,7 @@
 
 export const TABLES: Record<string, string[]> = {
   locations: ['id', 'name', 'area', 'icon', 'sort', 'expiry_warn_days'],
-  categories: ['id', 'name', 'area', 'icon', 'default_stock', 'sort'],
+  categories: ['id', 'name', 'area', 'icon', 'default_stock', 'sort', 'by_use'],
   stores: ['id', 'chain', 'branch', 'city'],
   products: [
     'id', 'name', 'area', 'category_id', 'default_unit', 'default_location_id', 'favorite', 'essential',

@@ -2,15 +2,15 @@ import { useEffect, useState } from 'react';
 import { Trash2, Snowflake, PackageOpen, Check, X } from 'lucide-react';
 import { Modal, Field, Input, Select, Toggle, Button, ProductPicker, Stepper } from './ui/kit.jsx';
 import { put, save } from '../db/repo.js';
-import { UNITS, todayISO, autoAddBelowStock, minStock, closeLot, allowedLocation, autoExpiry, durationLabel, usesOf } from '../db/logic.js';
+import { UNITS, todayISO, autoAddBelowStock, minStock, closeLot, allowedLocation, autoExpiry, durationLabel, usesOf, usesShown, usesFromShown, usesUnitLabel, lotUses, byUse, fmtQty, useBase } from '../db/logic.js';
 import { showToast } from '../hooks/useData.js';
 import { undo } from '../db/repo.js';
 
 const num = (v) => (v === '' || v == null ? null : Number(String(v).replace(',', '.')));
 
 export function ProductForm({ data, product, initialName = '', area = 'cibo', draft = null, onClose, onSaved }) {
-  const [f, setF] = useState(
-    product || {
+  const [f, setF] = useState(() => {
+    const base = product || {
       name: initialName,
       area,
       category_id: data.categoryList.find((c) => c.area === area)?.id,
@@ -27,8 +27,9 @@ export function ProductForm({ data, product, initialName = '', area = 'cibo', dr
       alternatives: '',
       notes: '',
       ...(draft || {}),
-    }
-  );
+    };
+    return { ...base, uses_shown: usesShown(base) ?? '' };
+  });
   const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
   const cats = data.categoryList.filter((c) => c.area === f.area);
   const locs = data.locationList;
@@ -36,15 +37,16 @@ export function ProductForm({ data, product, initialName = '', area = 'cibo', dr
 
   async function submit() {
     if (!f.name.trim()) return;
+    const { uses_shown: _u, ...rest } = f;
     const row = {
-      ...f,
+      ...rest,
       name: f.name.trim(),
       min_stock: num(f.min_stock),
       open_shelf_days: num(f.open_shelf_days),
       freezer_max_months: num(f.freezer_max_months),
       pantry_days: num(f.pantry_days),
       fridge_days: num(f.fridge_days),
-      uses_per_pack: f.default_unit === 'conf' ? num(f.uses_per_pack) : null,
+      uses_per_pack: usesFromShown(f.uses_shown, f.default_unit),
     };
     // luogo abituale coerente con le durate
     if (!allowedLocation(row, row.default_location_id)) row.default_location_id = locs.find((l) => l.area === row.area && allowedLocation(row, l.id))?.id || 'loc-altro';
@@ -116,9 +118,16 @@ export function ProductForm({ data, product, initialName = '', area = 'cibo', dr
           <Input inputMode="decimal" value={f.min_stock ?? ''} onChange={(e) => set('min_stock')(e.target.value)} placeholder={String(catDefault ?? 1)} />
         </Field>
       )}
-      {f.default_unit === 'conf' && (
-        <Field label="Usi per confezione" hint="Es. dado 10, bustine lievito 3. Le ricette scalano a usi (“2 dadi” = 2 usi).">
-          <Input inputMode="decimal" value={f.uses_per_pack ?? ''} onChange={(e) => set('uses_per_pack')(e.target.value)} placeholder="—" />
+      {f.area === 'cibo' && (
+        <Field
+          label={`Porzioni / usi per ${usesUnitLabel(f.default_unit)}`}
+          hint={
+            byUse(f, data.categories) && !f.uses_shown
+              ? `⚠ ${data.categories[f.category_id]?.name} è una categoria a utilizzo: indica quanti usi.`
+              : 'Es. dado 10 per conf, pasta 12 per kg, pesto 3 per vasetto. Le ricette scalano a usi (“2 dadi” = 2 usi, q.b. = 1 uso).'
+          }
+        >
+          <Input inputMode="decimal" value={f.uses_shown ?? ''} onChange={(e) => set('uses_shown')(e.target.value)} placeholder="—" />
         </Field>
       )}
       {f.area === 'cibo' && (
@@ -151,6 +160,27 @@ export function ProductForm({ data, product, initialName = '', area = 'cibo', dr
   );
 }
 
+// Usi gia' fatti della confezione/unita' aperta: cambia la quantita' del lotto.
+function UsesEditor({ qty, product, onChange }) {
+  const [units] = useState(() => lotUses(qty, product).units); // unita' iniziate, fisse mentre modifico
+  const u = usesOf(product);
+  const total = units * u;
+  const left = Math.round(qty * u * 10) / 10;
+  const used = Math.max(0, Math.round((total - left) * 10) / 10);
+  const setUsed = (v) => onChange(Math.round(((total - Math.min(Math.max(0, v), total)) / u) * 1000) / 1000);
+  return (
+    <div className="flex items-end gap-3 rounded-md border border-bg-border bg-bg-elevated/50 p-3">
+      <Field label="Usi già fatti">
+        <Stepper value={used} unit="usi" onChange={setUsed} />
+      </Field>
+      <p className="pb-2 text-sm text-text-secondary">
+        rimasti <b>{fmtQty(left)}</b> su {fmtQty(total)}
+        <span className="block text-xs text-text-muted">{fmtQty(Math.round(u * useBase(product.default_unit) * 100) / 100)} usi per {usesUnitLabel(product.default_unit)}</span>
+      </p>
+    </div>
+  );
+}
+
 // Scelta multipla delle alternative (salvate come nomi separati da virgola).
 function AltPicker({ data, product, value, onChange }) {
   const list = String(value || '').split(',').map((x) => x.trim()).filter(Boolean);
@@ -170,7 +200,7 @@ function AltPicker({ data, product, value, onChange }) {
           ))}
         </div>
       )}
-      <ProductPicker products={others} onPick={(p) => setList([...list, p.name])} onCreate={(name) => setList([...list, name])} placeholder="Aggiungi alternativa…" />
+      <ProductPicker products={others} prefer={product.category_id} onPick={(p) => setList([...list, p.name])} onCreate={(name) => setList([...list, name])} placeholder="Aggiungi alternativa (stessa categoria prima)…" />
     </div>
   );
 }
@@ -270,13 +300,14 @@ export function LotForm({ data, area, lot, presetProduct, onClose }) {
             <Field label="Quantità">
               <Stepper value={Number(f.qty)} unit={f.unit} onChange={set('qty')} />
             </Field>
-            {usesOf(product) && f.unit === 'conf' && <span className="pb-3 text-sm text-text-muted">≈ {Math.round(Number(f.qty) * usesOf(product) * 10) / 10} usi</span>}
+
             <Field label="Unità">
               <Select value={f.unit} onChange={(e) => set('unit')(e.target.value)}>
                 {UNITS.map((u) => <option key={u}>{u}</option>)}
               </Select>
             </Field>
           </div>
+          {usesOf(product) && f.unit === product.default_unit && Number(f.qty) > 0 && <UsesEditor qty={Number(f.qty)} product={product} onChange={set('qty')} />}
           <Field label="Dove">
             <div className="flex flex-wrap gap-2">
               {data.locationList.filter((l) => (l.area === product.area || l.id === 'loc-altro') && (allowedLocation(product, l.id) || l.id === f.location_id)).map((l) => (

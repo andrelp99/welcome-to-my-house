@@ -133,18 +133,21 @@ export function ExpiryBadge({ status }) {
 }
 
 // Ricerca prodotto nel catalogo con creazione al volo.
-export function ProductPicker({ products, area, onPick, onCreate, placeholder = 'Cerca prodotto…', autoFocus }) {
+// prefer = categoria da proporre per prima (es. alternative e sostituti: stessa categoria del prodotto).
+export function ProductPicker({ products, area, onPick, onCreate, placeholder = 'Cerca prodotto…', autoFocus, prefer }) {
   const [q, setQ] = useState('');
   const list = useMemo(() => {
-    const all = Object.values(products).filter((p) => !area || p.area === area);
+    const all = Object.values(products).filter((p) => (!area || p.area === area) && p.category_id !== 'cat-avanzi');
     const s = q.trim().toLowerCase();
-    const res = s ? all.filter((p) => p.name.toLowerCase().includes(s)) : all.filter((p) => p.favorite);
+    const res = s ? all.filter((p) => p.name.toLowerCase().includes(s)) : prefer ? all.filter((p) => p.category_id === prefer) : all.filter((p) => p.favorite);
     return res.sort((a, b) => {
+      const ca = prefer && a.category_id === prefer ? 0 : 1;
+      const cb = prefer && b.category_id === prefer ? 0 : 1;
       const sa = a.name.toLowerCase().startsWith(s) ? 0 : 1;
       const sb = b.name.toLowerCase().startsWith(s) ? 0 : 1;
-      return sa - sb || a.name.localeCompare(b.name);
-    }).slice(0, 12);
-  }, [products, area, q]);
+      return ca - cb || sa - sb || a.name.localeCompare(b.name);
+    }).slice(0, prefer && !s ? 24 : 12);
+  }, [products, area, q, prefer]);
   const exact = list.some((p) => p.name.toLowerCase() === q.trim().toLowerCase());
   return (
     <div className="space-y-2">
@@ -163,7 +166,7 @@ export function ProductPicker({ products, area, onPick, onCreate, placeholder = 
             <PlusCircle size={14} /> Nuovo: “{q.trim()}”
           </button>
         )}
-        {!q.trim() && list.length === 0 && <span className="text-xs text-text-muted">Scrivi per cercare (vuoto = preferiti ★)</span>}
+        {!q.trim() && list.length === 0 && <span className="text-xs text-text-muted">{prefer ? 'Nessun altro prodotto in questa categoria: scrivi per cercare' : 'Scrivi per cercare (vuoto = preferiti ★)'}</span>}
       </div>
     </div>
   );

@@ -8,7 +8,7 @@ import { db } from '../db/db.js';
 import { depletion } from '../db/finance.js';
 import { Button, IconButton, Tabs, Stepper, ExpiryBadge, Empty, LEVEL_DOT } from '../components/ui/kit.jsx';
 import { LotForm, ProductForm, quickLotAction } from '../components/forms.jsx';
-import { lotStatus, LEVEL_ORDER, fmtQty, setTotalQty, minStock, stepForProduct, closeLot, qtyLabel, allowedLocation } from '../db/logic.js';
+import { lotStatus, LEVEL_ORDER, fmtQty, setTotalQty, minStock, stepForProduct, closeLot, qtyLabel, allowedLocation, lotUses } from '../db/logic.js';
 
 export default function Inventario({ area, title, subtitle }) {
   const data = useData();
@@ -171,7 +171,7 @@ function ProductRow({ r, data, left, count, open, onToggle, setModal }) {
               <div key={lot.id} className="flex items-center gap-2 rounded-md bg-bg-surface border border-bg-border px-3 py-2">
                 <div className="flex-1 min-w-0 text-sm">
                   <div className="font-semibold">
-                    {qtyLabel(Number(lot.qty), lot.unit, p)} <span className="font-normal text-text-muted">· {loc?.name}</span>
+                    {lot.unit === p.default_unit && lotUses(lot.qty, p) ? `${fmtQty(Number(lot.qty))} ${lot.unit} · ${fmtQty(lotUses(lot.qty, p).left)}/${fmtQty(lotUses(lot.qty, p).total)} usi` : qtyLabel(Number(lot.qty), lot.unit, p)} <span className="font-normal text-text-muted">· {loc?.name}</span>
                   </div>
                   <div className="text-xs text-text-muted">
                     {lot.expiry_date ? `scad. ${lot.expiry_date.split('-').reverse().join('/')}` : 'senza scadenza'}

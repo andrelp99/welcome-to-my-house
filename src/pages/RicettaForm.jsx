@@ -263,7 +263,7 @@ export default function RicettaForm() {
                   </button>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
-                  <Toggle checked={!!i.optional} onChange={(v) => upd(setIngs, n, { optional: v ? 1 : 0 })} label="facoltativo" />
+                  <Toggle checked={!!i.optional} onChange={(v) => upd(setIngs, n, { optional: v ? 1 : 0 })} label="superfluo" />
                   <input value={i.grp || ''} onChange={(e) => upd(setIngs, n, { grp: e.target.value })} placeholder="gruppo (es. per la salsa)" className="flex-1 min-w-[10rem] bg-transparent border-b border-bg-border text-sm py-1 focus:outline-none focus:border-brand" />
                 </div>
               </li>

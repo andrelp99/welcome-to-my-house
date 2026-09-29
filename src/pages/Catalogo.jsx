@@ -35,7 +35,7 @@ export default function Catalogo() {
     if (k === 'essential') await autoAddBelowStock();
   };
 
-  const noDur = Object.values(data.products).filter((p) => p.area === 'cibo' && p.category_id !== 'cat-avanzi' && p.pantry_days == null && p.fridge_days == null).length;
+  const noDur = Object.values(data.products).filter((p) => p.area === 'cibo' && p.category_id !== 'cat-avanzi' && ((p.pantry_days == null && p.fridge_days == null) || (data.categories[p.category_id]?.by_use && !(Number(p.uses_per_pack) > 0)))).length;
   return (
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
@@ -48,7 +48,7 @@ export default function Catalogo() {
       {noDur > 0 && (
         <Link to="/catalogo/durate" className="flex items-center gap-3 rounded-lg border border-brand/50 bg-brand/10 px-4 py-3 hover:border-brand">
           <Timer size={18} className="text-brand shrink-0" />
-          <span className="flex-1 text-sm"><b>{noDur} prodotti</b> senza durate: scadenze automatiche spente.</span>
+          <span className="flex-1 text-sm"><b>{noDur} prodotti</b> da completare: durate o porzioni/usi mancanti.</span>
           <span className="text-brand text-sm font-semibold">Imposta →</span>
         </Link>
       )}
