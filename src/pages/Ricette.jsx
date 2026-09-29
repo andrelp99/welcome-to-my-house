@@ -7,7 +7,7 @@ import { Button, Tabs, Empty, Select } from '../components/ui/kit.jsx';
 import { Photo, SubstitutionsPanel } from '../components/recipes.jsx';
 import { recipeStatus, parseList, DIET_TAGS, DIFFICULTY } from '../db/recipes.js';
 import { countUnlinked } from '../db/linker.js';
-import { autoTags, cleanTags, COURSES, TIMES } from '../db/tags.js';
+import { autoTags, cleanTags, TIMES, COURSE_MAIN, BASES, DIFF_LABEL, FEATURE_GROUPS, COMPUTED_FEATURES, FEATURE_LABEL, featuresOf, foodLabel } from '../db/tags.js';
 import { expiringSet, urgentOf, recipeCost, nutritionOf } from '../db/insights.js';
 import { euro } from '../db/logic.js';
 
@@ -24,6 +24,9 @@ export default function Ricette() {
   const [fDiff, setFDiff] = useState('');
   const [sort, setSort] = useState('scade');
   const [fTags, setFTags] = useState([]);
+  const [fBase, setFBase] = useState('');
+  const [fFeat, setFFeat] = useState([]);
+  const [showFeat, setShowFeat] = useState(false);
   const month = new Date().getMonth() + 1;
 
   const rows = useMemo(() => {
@@ -43,17 +46,19 @@ export default function Ricette() {
         cost: recipeCost(ings, scale, data),
         kcal: nutritionOf(r)?.kcal ?? null,
       };
-    });
+    }).map((x) => ({ ...x, feats: featuresOf(x.r, { kcal: x.kcal, cost: x.cost }) }));
   }, [data, rec, month]);
 
   if (!data || !rec) return null;
   const s = q.trim().toLowerCase();
-  const list = rows.filter(({ r, st, diet: d, tags, season: inSeason, auto }) => {
+  const baseMatch = (auto) => [auto.main, auto.second].some((f) => f && (fBase.includes('|') ? f.value === fBase : f.group === fBase));
+  const list = rows.filter(({ r, st, diet: d, tags, season: inSeason, auto, feats }) => {
     if (season && !inSeason) return false;
-    if (fCourse && auto.course?.value !== fCourse) return false;
-    if (fTime && TIMES.findIndex((x) => x.v === auto.time) > TIMES.findIndex((x) => x.v === fTime)) return false;
-    if (fTime && !auto.time) return false;
-    if (fDiff && auto.difficulty?.value !== fDiff) return false;
+    if (fCourse && auto.courseGroup !== fCourse) return false;
+    if (fBase && !baseMatch(auto)) return false;
+    if (fTime && auto.time !== fTime) return false;
+    if (fFeat.length && !fFeat.every((f) => feats.has(f))) return false;
+    if (fDiff && auto.difficulty?.value !== fDiff) return false; // valori facile/media/difficile
     if (fTags.length && !fTags.every((t) => tags.includes(t))) return false;
     if (tab === 'ok' && !st.feasible) return false;
     if (tab === 'fav' && !r.favorite) return false;
@@ -76,7 +81,8 @@ export default function Ricette() {
   const tagFreq = {};
   for (const x of rows) for (const t of x.tags) tagFreq[t] = (tagFreq[t] || 0) + 1;
   const topTags = Object.entries(tagFreq).filter(([, n]) => n > 1).sort((a, b) => b[1] - a[1]).slice(0, 16).map(([t]) => t);
-  const untagged = rows.filter((x) => x.tags.length < 2).length;
+  const unclassified = rows.filter((x) => !x.r.main_food || !x.feats.size).length;
+  const activeFilters = fFeat.length + diet.length + (season ? 1 : 0);
   const counts = { all: rows.length, ok: rows.filter((x) => x.st.feasible).length, fav: rows.filter((x) => x.r.favorite).length };
 
   return (
@@ -135,7 +141,7 @@ export default function Ricette() {
               className="w-full rounded-md bg-bg-elevated border border-bg-border pl-9 pr-3 py-2.5 placeholder:text-text-muted focus:outline-none focus:border-brand"
             />
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
             <Select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Ordina">
               <option value="scade">Prima ciò che scade</option>
               <option value="costo">Più economiche</option>
@@ -144,18 +150,48 @@ export default function Ricette() {
             </Select>
             <Select value={fCourse} onChange={(e) => setFCourse(e.target.value)} aria-label="Portata">
               <option value="">Portata</option>
-              {COURSES.map((c) => <option key={c} value={c}>{c}</option>)}
+              {[...COURSE_MAIN, 'Altro'].map((c) => <option key={c} value={c}>{c}</option>)}
+            </Select>
+            <Select value={fBase} onChange={(e) => setFBase(e.target.value)} aria-label="Base">
+              <option value="">Base</option>
+              {BASES.map((b) => (
+                <optgroup key={b.id} label={b.id}>
+                  <option value={b.id}>{b.id} (tutto)</option>
+                  {b.subs.map((x) => <option key={x} value={`${b.id}|${x}`}>{`${b.id} · ${x}`}</option>)}
+                </optgroup>
+              ))}
             </Select>
             <Select value={fTime} onChange={(e) => setFTime(e.target.value)} aria-label="Tempo">
               <option value="">Tempo</option>
-              {TIMES.slice(0, 3).map((t) => <option key={t.v} value={t.v}>{t.v}</option>)}
+              {TIMES.map((t) => <option key={t.v} value={t.v}>{`${t.v} (${t.hint})`}</option>)}
             </Select>
             <Select value={fDiff} onChange={(e) => setFDiff(e.target.value)} aria-label="Difficoltà">
               <option value="">Difficoltà</option>
-              {DIFFICULTY.map((d) => <option key={d} value={d}>{d}</option>)}
+              {DIFFICULTY.map((d) => <option key={d} value={d}>{DIFF_LABEL[d]}</option>)}
             </Select>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => setShowFeat((v) => !v)} className="text-sm font-semibold text-brand">
+            Caratteristiche{activeFilters ? ` (${activeFilters})` : ''} {showFeat ? '▴' : '▾'}
+          </button>
+          {showFeat && (
+          <div className="space-y-2 rounded-lg border border-bg-border bg-bg-surface p-3">
+            {[{ id: 'calc', label: 'Calcolate (1 porzione)', items: COMPUTED_FEATURES }, ...FEATURE_GROUPS].map((g) => (
+              <div key={g.id} className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] uppercase tracking-wider text-text-muted w-full">{g.label}</span>
+                {g.items.map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setFFeat((f) => (f.includes(id) ? f.filter((x) => x !== id) : [...f, id]))}
+                    className={`rounded-full px-2.5 py-0.5 text-xs border ${fFeat.includes(id) ? 'bg-brand text-brand-on border-brand' : 'border-bg-border text-text-secondary'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            ))}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] uppercase tracking-wider text-text-muted w-full">Dieta e stagione</span>
             <button
               type="button"
               onClick={() => setSeason((v) => !v)}
@@ -163,7 +199,7 @@ export default function Ricette() {
             >
               <Leaf size={12} /> di stagione ({monthName(month)})
             </button>
-            {DIET_TAGS.map((t) => (
+            {DIET_TAGS.filter((t) => t !== 'veloce' && t !== 'leggero').map((t) => (
               <button
                 key={t}
                 type="button"
@@ -174,6 +210,8 @@ export default function Ricette() {
               </button>
             ))}
           </div>
+          </div>
+          )}
 
           <div className="flex flex-wrap items-center gap-2">
             {[...new Set([...fTags, ...topTags])].map((t) => (
@@ -187,7 +225,7 @@ export default function Ricette() {
               </button>
             ))}
             <Link to="/ricette/tag" className="inline-flex items-center gap-1 text-xs font-semibold text-brand">
-              <Sparkles size={12} /> {untagged ? `Tag con AI (${untagged} senza)` : 'Tag con AI'}
+              <Sparkles size={12} /> {unclassified ? `Classifica con AI (${unclassified} da fare)` : 'Classifica con AI'}
             </Link>
           </div>
 
@@ -195,7 +233,7 @@ export default function Ricette() {
             <Empty icon={BookOpen}>{rows.length === 0 ? 'Nessuna ricetta. Crea con + o importa (link, testo, foto, file GZ).' : 'Nessuna ricetta con questi filtri.'}</Empty>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {list.map(({ r, st, diet: d, season: inSeason, auto, urgent, cost, kcal }) => {
+              {list.map(({ r, st, diet: d, season: inSeason, auto, urgent, cost, kcal, feats }) => {
                 return (
                   <Link key={r.id} to={`/ricette/${r.id}`} className="flex sm:flex-col gap-3 sm:gap-0 rounded-lg border border-bg-border bg-bg-surface shadow-card overflow-hidden hover:border-brand transition-colors">
                     <Photo id={r.photo_key} className="w-24 h-24 sm:w-full sm:h-36 shrink-0" />
@@ -206,12 +244,13 @@ export default function Ricette() {
                       </div>
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
                         {auto.course && <span className="font-semibold text-text-secondary">{auto.course.value}</span>}
+                        {auto.main && <span className="text-text-secondary">{foodLabel(auto.main.value)}</span>}
                         {auto.time && (
                           <span className="inline-flex items-center gap-1">
                             <Clock size={12} /> {auto.time}
                           </span>
                         )}
-                        {auto.difficulty && <span>{auto.difficulty.value}</span>}
+                        {auto.difficulty && <span>{auto.difficulty.label}</span>}
                         {cost.known > 0 && <span title={cost.unknown.length ? `senza prezzo: ${cost.unknown.join(', ')}` : 'costo stimato per porzione'}>{euro(cost.total)}{cost.unknown.length ? '+' : ''}</span>}
                         {kcal != null && <span>{Math.round(kcal)} kcal</span>}
                         {r.cooked_count ? <span>cucinata {r.cooked_count}×</span> : null}
@@ -224,7 +263,7 @@ export default function Ricette() {
                           </span>
                         )}
                         {inSeason && <Leaf size={14} className="text-positive self-center" aria-label="di stagione" />}
-                        {d.slice(0, 2).map((t) => (
+                        {[...d.filter((t) => t !== 'leggero' && t !== 'veloce'), ...[...feats].map((f) => FEATURE_LABEL[f])].slice(0, 3).map((t) => (
                           <span key={t} className="rounded-full border border-bg-border px-2 py-0.5 text-[11px] text-text-secondary">{t}</span>
                         ))}
                       </div>

@@ -43,7 +43,12 @@ export default function Catalogo() {
           <h1 className="text-2xl md:text-3xl font-bold">Catalogo</h1>
           <p className="text-text-secondary text-sm">★ preferiti = spesa base · 🛡 essenziali = scorta minima garantita</p>
         </div>
-        <Button onClick={() => setModal({})}><Plus size={18} /> Nuovo</Button>
+        <div className="flex gap-2 shrink-0">
+          <Link to="/catalogo/durate" aria-label="Durate e porzioni" className="inline-flex items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-semibold bg-bg-elevated border border-bg-border hover:bg-bg-hover">
+            <Timer size={18} /> <span className="hidden sm:inline">Durate e porzioni</span>
+          </Link>
+          <Button onClick={() => setModal({})}><Plus size={18} /> Nuovo</Button>
+        </div>
       </div>
       {noDur > 0 && (
         <Link to="/catalogo/durate" className="flex items-center gap-3 rounded-lg border border-brand/50 bg-brand/10 px-4 py-3 hover:border-brand">

@@ -222,20 +222,49 @@ app.post('/ai/categories', async (c) => {
   }
 });
 
-// Tag ricette (max 15 per chiamata): ingrediente principale, cottura, occasione, carattere, cucina.
-app.post('/ai/tags', async (c) => {
-  const body = await c.req.json<{ items?: { title?: string; course?: string; minutes?: number; ingredients?: string[] }[] }>().catch(() => null);
-  const items = (body?.items || []).slice(0, 15).map((x) => ({ title: String(x?.title || '').slice(0, 100), course: String(x?.course || '').slice(0, 30), minutes: Number(x?.minutes) || null, ingredients: (x?.ingredients || []).slice(0, 15).map((i) => String(i).slice(0, 40)) }));
+// Classificazione ricette (max 12 per chiamata): portata, difficolta', alimento principale/secondario, caratteristiche.
+const CLS = {
+  course: ['Antipasto', 'Primo', 'Secondo', 'Contorno', 'Piatto unico', 'Dolce', 'Salsa e sugo', 'Pane e lievitati', 'Colazione', 'Bevanda'],
+  difficulty: ['facile', 'media', 'difficile'],
+  food: ['Carne', 'Carne|bianca', 'Carne|rossa', 'Carne|maiale', 'Carne|salumi', 'Pesce', 'Pesce|pesce', 'Pesce|crostacei', 'Pesce|molluschi', 'Uova', 'Latticini', 'Latticini|formaggi', 'Latticini|ricotta', 'Latticini|yogurt', 'Proteine', 'Proteine|legumi', 'Proteine|tofu e seitan', 'Proteine|altre', 'Carboidrati', 'Carboidrati|pasta', 'Carboidrati|riso', 'Carboidrati|cereali', 'Carboidrati|pane e impasti', 'Carboidrati|patate', 'Verdure', 'Verdure|ortaggi', 'Verdure|funghi', 'Verdure|frutta'],
+  features: ['congela', 'frigo', 'subito', 'mealprep', 'freddo', 'tiepido', 'caldo', 'crudo', 'forno', 'padella', 'griglia', 'fritto', 'bollito', 'umido', 'schiscetta', 'unapentola', 'anticipo', 'proteico', 'sostanzioso', 'piccante', 'quotidiano', 'ospiti', 'festa', 'estate', 'inverno'],
+  diet: ['senza glutine', 'senza lattosio'],
+};
+const pickOne = (v: unknown, list: string[]) => {
+  const s = String(v ?? '').trim();
+  return list.find((x) => x.toLowerCase() === s.toLowerCase()) ?? null;
+};
+app.post('/ai/classify', async (c) => {
+  const body = await c.req.json<{ items?: { title?: string; course?: string; minutes?: number; rest?: number; steps?: number; ingredients?: string[] }[] }>().catch(() => null);
+  const items = (body?.items || []).slice(0, 12).map((x) => ({
+    title: String(x?.title || '').slice(0, 100),
+    course: String(x?.course || '').slice(0, 30),
+    minutes: Number(x?.minutes) || null,
+    rest: Number(x?.rest) || 0,
+    steps: Number(x?.steps) || 0,
+    ingredients: (x?.ingredients || []).slice(0, 18).map((i) => String(i).slice(0, 40)),
+  }));
   if (!items.length || items.some((x) => !x.title)) return c.json({ error: 'Nessuna ricetta' }, 400);
-  const text = items.map((x, n) => `${n + 1}. ${x.title} | portata: ${x.course || '—'} | tempo: ${x.minutes ? `${x.minutes} min` : '—'} | ingredienti: ${x.ingredients.join(', ')}`).join('\n');
-  const COURSES = ['Antipasto', 'Primo', 'Secondo', 'Contorno', 'Piatto unico', 'Dolce', 'Salsa e sugo', 'Pane e lievitati', 'Colazione', 'Bevanda'];
+  const text = items
+    .map((x, n) => `${n + 1}. ${x.title} | portata: ${x.course || '—'} | minuti totali: ${x.minutes ?? '—'} | riposo: ${x.rest} | passaggi: ${x.steps} | ingredienti: ${x.ingredients.join(', ')}`)
+    .join('\n');
   try {
-    const { model, data } = await extract(c.env, 'tags', { text });
+    const { model, data } = await extract(c.env, 'classify', { text });
     const raw = Array.isArray((data as any)?.items) ? (data as any).items : [];
     const out = items.map((x, i) => {
       const r = raw.find((y: any) => Number(y?.n) === i + 1) || raw[i] || {};
-      const tags = [...new Set((Array.isArray(r.tags) ? r.tags : []).map((t: unknown) => String(t).toLowerCase().trim().slice(0, 30)).filter(Boolean))].slice(0, 8);
-      return { title: x.title, tags, course: COURSES.includes(r.course) ? r.course : null };
+      const main = pickOne(r.main, CLS.food);
+      const second = pickOne(r.second, CLS.food);
+      const list = (v: unknown, allowed: string[]) => [...new Set((Array.isArray(v) ? v : []).map((f) => pickOne(f, allowed)).filter((f): f is string => !!f))];
+      return {
+        title: x.title,
+        course: pickOne(r.course, CLS.course),
+        difficulty: pickOne(r.difficulty, CLS.difficulty),
+        main,
+        second: second && second !== main ? second : null,
+        features: list(r.features, CLS.features).slice(0, 8),
+        diet: list(r.diet, CLS.diet),
+      };
     });
     return c.json({ model, items: out });
   } catch (e) {

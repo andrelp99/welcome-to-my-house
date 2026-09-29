@@ -5,7 +5,8 @@ import { useData, useRecipes, showToast } from '../hooks/useData.js';
 import { Button, IconButton, Field, Input, Select, Modal, Toggle } from '../components/ui/kit.jsx';
 import { PhotoPicker, LinkModal } from '../components/recipes.jsx';
 import { ProductForm } from '../components/forms.jsx';
-import { autoTags, cleanTags, courseOf, COURSES } from '../db/tags.js';
+import { autoTags, cleanTags, courseOf, COURSES, DIFF_LABEL } from '../db/tags.js';
+import { FoodSelect, FeaturePicker } from './TagAI.jsx';
 import { parseIngredientLine, autoLink, learnedLinks, NO_PRODUCT, RECIPE_UNITS, DIET_TAGS, DIFFICULTY, parseList, joinList, detectTimer, suggestDiet } from '../db/recipes.js';
 import { save } from '../db/repo.js';
 import { uuid } from '../db/db.js';
@@ -13,7 +14,7 @@ import { uuid } from '../db/db.js';
 const num = (v) => (v === '' || v == null ? null : Number(String(v).replace(',', '.')));
 const txtArea = 'w-full rounded-md bg-bg-elevated border border-bg-border px-3 py-2.5 text-text-primary placeholder:text-text-muted focus:outline-none focus:border-brand';
 
-const EMPTY = { title: '', servings: 1, prep_min: '', cook_min: '', rest_min: '', difficulty: '', course: '', tags: '', diet_tags: '', photo_key: null, source_url: '', notes: '', favorite: 0 };
+const EMPTY = { title: '', servings: 1, prep_min: '', cook_min: '', rest_min: '', difficulty: '', course: '', main_food: '', second_food: '', features: '', tags: '', diet_tags: '', photo_key: null, source_url: '', notes: '', favorite: 0 };
 
 export default function RicettaForm() {
   const { id } = useParams();
@@ -108,6 +109,9 @@ export default function RicettaForm() {
       rest_min: num(f.rest_min),
       difficulty: f.difficulty || null,
       course: f.course || null,
+      main_food: f.main_food || null,
+      second_food: f.second_food && f.second_food !== f.main_food ? f.second_food : null,
+      features: joinList(parseList(f.features)) || null,
       tags: joinList(parseList(f.tags)) || null,
       diet_tags: joinList(diet) || null,
       photo_key: f.photo_key || null,
@@ -191,15 +195,24 @@ export default function RicettaForm() {
           </Field>
           <Field label="Difficoltà">
             <Select value={f.difficulty || ''} onChange={(e) => set('difficulty')(e.target.value)}>
-              <option value="">auto{autoT.difficulty ? ` (${autoT.difficulty.value})` : ''}</option>
+              <option value="">auto{autoT.difficulty ? ` (${autoT.difficulty.label})` : ''}</option>
               {DIFFICULTY.map((d) => (
-                <option key={d} value={d}>{d}</option>
+                <option key={d} value={d}>{DIFF_LABEL[d]}</option>
               ))}
             </Select>
           </Field>
+          <Field label="Alimento principale">
+            <FoodSelect value={f.main_food} onChange={(v) => set('main_food')(v || '')} />
+          </Field>
+          <Field label="Secondario (facoltativo)">
+            <FoodSelect value={f.second_food} onChange={(v) => set('second_food')(v || '')} />
+          </Field>
         </div>
+        <Field label="Caratteristiche" hint="Leggero, economico e richiede riposo si calcolano da soli (su 1 porzione).">
+          <FeaturePicker value={parseList(f.features)} onChange={(v) => set('features')(joinList(v))} />
+        </Field>
         <div>
-          <Field label="Altri tag" hint="separati da virgola · portata, tempo e difficoltà sono automatici">
+          <Field label="Altri tag" hint="separati da virgola · il tempo è automatico">
             <Input value={f.tags || ''} onChange={(e) => set('tags')(e.target.value)} placeholder="primo, pasta" />
           </Field>
         </div>

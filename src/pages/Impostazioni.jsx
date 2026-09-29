@@ -135,7 +135,7 @@ export default function Impostazioni() {
         <p className="text-text-secondary text-sm">{key ? 'Dispositivo attivato.' : 'Dispositivo non attivato: apri il link di attivazione.'}</p>
       </Card>
       <Card title="Versione" icon={Info}>
-        <p className="text-text-secondary text-sm">0.10.0 · usi, superflui, tag AI</p>
+        <p className="text-text-secondary text-sm">0.11.0 · classificazione ricette</p>
       </Card>
     </div>
   );

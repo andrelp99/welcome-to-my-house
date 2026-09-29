@@ -79,7 +79,7 @@ worker/ai.ts           interfaccia AI unica (ricetta, scontrino) con modello di 
 worker/importer.ts     import da link (JSON-LD schema.org) e copia foto remote in D1
 worker/webpush.ts      Web Push: VAPID ES256 + cifratura aes128gcm
 worker/digest.ts       contenuti notifiche: scadenze, riepilogo settimana, report mensile
-migrations/            schema D1: 0001_init … 0008_categorie_a_uso
+migrations/            schema D1: 0001_init … 0009_classificazione
 src/db/                Dexie, sync, logica dispensa, ricette, import, collega ingredienti, scontrino, planner, stagionalità, finanze, foto, push
 src/pages/             Home, Casa/Dispensa (Inventario), Spesa, Ricette (+ dettaglio, editor, import, cucina), Planner, Finanze, Catalogo, Impostazioni
 src/components/        ui/ (kit, layout, card), forms, recipes, charts
@@ -202,3 +202,17 @@ Foto in D1 (non R2): nessun bucket da creare, limite free 5 GB ampiamente suffic
 - **Ingredienti superflui**: nel dettaglio ricetta, icona occhio su ogni ingrediente (= `optional`). Grigio, non conta come presente/mancante, non va in lista, non si scala con "Ho cucinato", fuori da costo, scadenze e "Collega".
 - **Tag con AI**: `/ricette/tag`, `POST /api/ai/tags` (15 ricette per chiamata): ingrediente principale, cottura, occasione, carattere, cucina (+ portata se manca). Tocca un tag per scartarlo, poi Conferma. Proposte in `meta.tag_ai`. Nel ricettario: filtro per tag (i più usati) e link "Tag con AI".
 - Migrazione `0008_categorie_a_uso.sql`: PRIMA del push.
+
+## Classificazione ricette (0.11.0)
+
+Sostituisce i tag AI liberi della 0.10 (quei tag ora sono nascosti per non duplicare). Vocabolario in `src/db/tags.js`.
+
+- **Tempo** (preparazione + cottura + riposo): Breve ≤ 30′ · Medio 30–60′ · Lungo > 60′. Calcolato.
+- **Difficoltà**: Semplice · Media · Complessa (salvate come facile/media/difficile). AI o a mano; senza valore: stima automatica ("~").
+- **Portata**: Antipasto · Primo · Secondo · Contorno · Piatto unico · Dolce · Altro (salse e sughi, pane e lievitati, colazione, bevande).
+- **Base**: `recipes.main_food` (principale) + `recipes.second_food` (facoltativo), valori "Gruppo" o "Gruppo|sotto": Carne (bianca, rossa, maiale, salumi), Pesce (pesce, crostacei, molluschi), Uova, Latticini (formaggi, ricotta, yogurt), Proteine (legumi, tofu e seitan, altre), Carboidrati (pasta, riso, cereali, pane e impasti, patate), Verdure (ortaggi, funghi, frutta).
+- **Caratteristiche** (`recipes.features`, id separati da virgola): conservazione, come si mangia, cottura, praticità, profilo, occasione. Calcolate e non salvate (sempre su 1 porzione): leggero ≤ 500 kcal, economico ≤ 2 € (solo con tutti i prezzi noti), richiede riposo ≥ 30′. Dieta resta in `diet_tags`.
+- **AI**: `/ricette/tag` ("Classifica ricette"), `POST /api/ai/classify` (12 ricette per chiamata, valori validati sul server), proposte in `meta.cls_ai`, compila solo i campi vuoti, tutto modificabile (▾), conferma in blocco.
+- **Ricettario**: filtri Portata, Base (gruppo o sotto, principale o secondario), Tempo, Difficoltà + pannello "Caratteristiche". Editor ricetta: base, secondario, caratteristiche.
+- **Catalogo**: pulsante fisso "Durate e porzioni".
+- Migrazione `0009_classificazione.sql`: PRIMA del push.

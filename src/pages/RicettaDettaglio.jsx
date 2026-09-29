@@ -9,7 +9,7 @@ import { recipeStatus, addMissingToList, recipeToText, parseList, joinList, sugg
 import { fmtQty } from '../db/logic.js';
 import { put, save, undo } from '../db/repo.js';
 import { StatusChip } from './Ricette.jsx';
-import { autoTags, cleanTags } from '../db/tags.js';
+import { autoTags, cleanTags, featuresOf, foodLabel, FEATURE_LABEL } from '../db/tags.js';
 import { expiringSet, urgentOf, recipeCost, nutritionOf, NUTRI_LABELS } from '../db/insights.js';
 import { euro } from '../db/logic.js';
 
@@ -51,6 +51,7 @@ export default function RicettaDettaglio() {
   const urgent = urgentOf(ings, expiringSet(data), data);
   const cost = recipeCost(ings, scale, data);
   const nutri = nutritionOf(recipe);
+  const feats = featuresOf(recipe, { kcal: nutri?.kcal ?? null, cost: recipeCost(ings, 1 / (recipe.servings || 1), data) });
   const portions = servings || 1;
   const suggested = suggestDiet(recipe, ings, data).filter((t) => !diet.includes(t));
   const toBuy = status.rows.filter(({ ing, st }) => !ing.optional && !st.sub && (st.level === 'missing' || st.level === 'low')).length;
@@ -125,8 +126,13 @@ export default function RicettaDettaglio() {
           <div className="flex flex-wrap gap-1.5">
             <span className="print:hidden"><StatusChip st={status} /></span>
             {auto.course && <AutoTag label="portata" auto={auto.course.auto}>{auto.course.value}</AutoTag>}
-            {auto.time && <AutoTag label="tempo totale" icon={Clock}>{auto.time}</AutoTag>}
-            {auto.difficulty && <AutoTag label="difficoltà" icon={Gauge} auto={auto.difficulty.auto}>{auto.difficulty.value}</AutoTag>}
+            {auto.main && <AutoTag label="alimento principale">{foodLabel(auto.main.value)}</AutoTag>}
+            {auto.second && <AutoTag label="alimento secondario">+ {foodLabel(auto.second.value)}</AutoTag>}
+            {auto.time && <AutoTag label="tempo totale (con riposo)" icon={Clock}>{auto.time}</AutoTag>}
+            {auto.difficulty && <AutoTag label="difficoltà" icon={Gauge} auto={auto.difficulty.auto}>{auto.difficulty.label}</AutoTag>}
+            {[...feats].map((f) => (
+              <span key={f} className="rounded-full border border-bg-border px-2 py-0.5 text-xs text-text-secondary">{FEATURE_LABEL[f]}</span>
+            ))}
             {diet.map((t) => (
               <span key={t} className="rounded-full border border-brand/50 text-brand px-2 py-0.5 text-xs">{t}</span>
             ))}

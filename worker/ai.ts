@@ -69,16 +69,24 @@ Ricevi categorie di prodotti alimentari (id, nome, esempi di prodotti).
 Decidi se ogni categoria e' "a utilizzo": i suoi prodotti si consumano a piccole dosi/usi ripetuti da una confezione (spezie, sale, salse, condimenti, olio, aceto, dadi, lievito, caffe'...) invece che a quantita' intere pesate per ricetta (carne, pasta, verdura, frutta, latte...).
 Rispondi SOLO con JSON valido: { "items": [{"id": string, "by_use": boolean}] } con un elemento per ogni categoria ricevuta.`,
 
-  tags: `Sei un assistente che classifica ricette italiane con tag utili per scegliere cosa cucinare.
-Ricevi ricette numerate (titolo, portata, tempo, ingredienti principali).
-Per ciascuna scegli da 3 a 7 tag brevi, minuscoli, in italiano, tra questi gruppi:
-- ingrediente principale: pollo, manzo, maiale, vitello, agnello, pesce, crostacei, molluschi, uova, formaggi, legumi, verdure, funghi, patate, pasta, riso, cereali
-- cottura: al forno, in padella, alla griglia, fritto, bollito, al vapore, in umido, crudo, slow cooking
-- occasione: tutti i giorni, cena con ospiti, festa, schiscetta, meal prep, estate, inverno
-- carattere: leggero, sostanzioso, piccante, comfort food, economico, per bambini
-- cucina: tradizionale, regionale, etnica (o la regione/paese se chiaro, es. "siciliana", "indiana")
-Rispondi SOLO con JSON valido: { "items": [{"n": number, "tags": string[], "course": "Antipasto"|"Primo"|"Secondo"|"Contorno"|"Piatto unico"|"Dolce"|"Salsa e sugo"|"Pane e lievitati"|"Colazione"|"Bevanda"|null}] }
-Un elemento per ogni ricetta con lo stesso "n". Non ripetere la portata nei tag. Non inventare ingredienti.`,
+  classify: `Sei un assistente che classifica ricette italiane per aiutare a scegliere cosa cucinare.
+Ricevi ricette numerate (titolo, portata attuale, minuti totali, minuti di riposo, n. passaggi, ingredienti).
+Per ciascuna rispondi usando SOLO questi valori:
+- course: "Antipasto"|"Primo"|"Secondo"|"Contorno"|"Piatto unico"|"Dolce"|"Salsa e sugo"|"Pane e lievitati"|"Colazione"|"Bevanda"
+- difficulty: "facile"|"media"|"difficile" (tecnica richiesta, numero di passaggi, precisione)
+- main: alimento PRINCIPALE, "Gruppo" o "Gruppo|sotto" tra:
+  Carne|bianca, Carne|rossa, Carne|maiale, Carne|salumi, Pesce|pesce, Pesce|crostacei, Pesce|molluschi, Uova,
+  Latticini|formaggi, Latticini|ricotta, Latticini|yogurt, Proteine|legumi, Proteine|tofu e seitan, Proteine|altre,
+  Carboidrati|pasta, Carboidrati|riso, Carboidrati|cereali, Carboidrati|pane e impasti, Carboidrati|patate,
+  Verdure|ortaggi, Verdure|funghi, Verdure|frutta
+- second: alimento secondario importante con gli stessi valori, oppure null (solo se davvero caratterizza il piatto, es. pasta e fagioli: main Carboidrati|pasta, second Proteine|legumi)
+- features: da 2 a 6 tra: congela (si congela bene), frigo (dura 2-3 giorni in frigo), subito (da mangiare subito), mealprep,
+  freddo, tiepido, caldo, crudo (senza cottura), forno, padella, griglia, fritto, bollito (anche vapore), umido (cottura lenta/in umido),
+  schiscetta (da portare via), unapentola, anticipo (si prepara in anticipo), proteico, sostanzioso, piccante,
+  quotidiano (tutti i giorni), ospiti, festa, estate, inverno
+- diet: tra "senza glutine", "senza lattosio" solo se certo dagli ingredienti, altrimenti []
+Rispondi SOLO con JSON valido: { "items": [{"n": number, "course": string, "difficulty": string, "main": string, "second": string|null, "features": string[], "diet": string[]}] }
+Un elemento per ogni ricetta con lo stesso "n". Non inventare valori fuori elenco.`,
 } as const;
 
 export type ExtractKind = keyof typeof PROMPTS;
