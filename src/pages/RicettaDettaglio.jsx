@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
-import { ArrowLeft, Pencil, Star, Clock, Flame, Hourglass, Gauge, ChefHat, UtensilsCrossed, ShoppingCart, Share2, FileDown, Trash2, Timer, ExternalLink, Plus } from 'lucide-react';
+import { ArrowLeft, Pencil, Clock, Flame, Hourglass, Gauge, ChefHat, UtensilsCrossed, ShoppingCart, Share2, FileDown, Trash2, Timer, ExternalLink, Plus } from 'lucide-react';
 import { useData, useRecipes, showToast } from '../hooks/useData.js';
 import { Button, IconButton, Stepper, Empty } from '../components/ui/kit.jsx';
 import { Photo, IngredientList, CookedModal, LinkModal, Stars, freqText } from '../components/recipes.jsx';
@@ -102,9 +102,6 @@ export default function RicettaDettaglio() {
           <ArrowLeft size={18} />
         </IconButton>
         <div className="flex-1" />
-        <IconButton label={recipe.favorite ? 'Togli dalle preferite' : 'Preferita'} onClick={() => put('recipes', { id, favorite: recipe.favorite ? 0 : 1 })}>
-          <Star size={18} className={recipe.favorite ? 'fill-brand text-brand' : ''} />
-        </IconButton>
         <IconButton label="Condividi testo" onClick={share}>
           <Share2 size={18} />
         </IconButton>

@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { addDays, isSameDay } from 'date-fns';
-import { ChevronLeft, ChevronRight, Plus, ShoppingCart, Trash2, Check, PenLine, ChefHat, Sparkles, MapPin, BarChart3 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, ShoppingCart, Trash2, Check, PenLine, ChefHat, Sparkles, MapPin, BarChart3, Apple } from 'lucide-react';
 import { useData, useRecipes, showToast } from '../hooks/useData.js';
 import { Button, IconButton, Modal, Field, Toggle, Select, Empty } from '../components/ui/kit.jsx';
 import { AddDishModal, MealModal, VarietyDashboard, Analyses } from '../components/diary.jsx';
-import { MEALS_ALL, PLACES, mealId } from '../db/variety.js';
+import { MEALS_ALL, PLACES, mealId, itemKindOfCourse } from '../db/variety.js';
 import { getSetting, saveSetting, proposeFor, saveProposals, removeProposals } from '../db/meals.js';
 import { foodLabel } from '../db/tags.js';
 import { Photo } from '../components/recipes.jsx';
@@ -140,10 +140,11 @@ export default function Planner() {
                     </div>
                     {list.map((e) => {
                       const r = (e.recipe_id && rec.byId[e.recipe_id]) || (e.leftover_of && rec.byId[e.leftover_of]);
-                      const title = r ? `${e.leftover_of ? 'Avanzo: ' : ''}${r.title}` : e.note || 'Piatto';
+                      const isItem = !r && String(e.dish_features || '').split(',').includes('alimento');
+                      const title = r ? `${e.leftover_of ? 'Avanzo: ' : ''}${r.title}` : `${e.note || 'Piatto'}${isItem && Number(e.servings) > 1 ? ` ×${e.servings}` : ''}`;
                       return (
                         <div key={e.id} className="flex items-center gap-2 py-1">
-                          {r ? <Photo id={r.photo_key} className="w-10 h-10 rounded-md shrink-0" /> : <PenLine size={18} className="text-text-muted shrink-0 mx-2.5" />}
+                          {r ? <Photo id={r.photo_key} className="w-10 h-10 rounded-md shrink-0" /> : isItem ? <Apple size={18} className="text-text-muted shrink-0 mx-2.5" /> : <PenLine size={18} className="text-text-muted shrink-0 mx-2.5" />}
                           <div className="flex-1 min-w-0">
                             {e.recipe_id && r ? (
                               <Link to={`/ricette/${r.id}?porzioni=${e.servings}&piano=${e.id}`} className={`block truncate font-medium ${e.done ? '' : past ? 'text-text-muted' : ''}`}>
@@ -155,7 +156,8 @@ export default function Planner() {
                             <div className="flex flex-wrap items-center gap-2 text-xs text-text-muted">
                               {e.done ? <span className="text-positive">mangiato</span> : past ? <span>non segnato</span> : null}
                               {e.auto && !e.done ? <span className="text-brand">proposta</span> : null}
-                              {!e.recipe_id && !e.leftover_of && e.dish_main ? <span>{foodLabel(e.dish_main)}</span> : null}
+                              {isItem ? <span className="rounded-full border border-bg-border px-1.5">{itemKindOfCourse(e.dish_course).label}</span> : null}
+                              {!e.recipe_id && !e.leftover_of && e.dish_main ? <span>{isItem ? 'conta: ' : ''}{foodLabel(e.dish_main)}</span> : null}
                               {!e.done && status[e.id] && <StatusChip st={status[e.id]} />}
                             </div>
                           </div>

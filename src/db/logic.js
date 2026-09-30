@@ -200,27 +200,42 @@ export async function setTotalQty(product, target, data) {
         table: 'stock_lots',
         row: { product_id: product.id, qty: diff, unit: product.default_unit, location_id: loc, expiry_date: exp, frozen_at: loc === 'loc-freezer' ? todayISO() : null },
       });
-  } else {
-    let toTake = -diff;
-    let value = 0;
-    let known = false;
-    for (const l of lots) {
-      if (toTake <= 0) break;
-      const take = Math.min(Number(l.qty), toTake);
-      toTake -= take;
-      const v = lotValue(l, take, data);
-      if (v != null) {
-        value += v;
-        known = true;
-      }
-      const left = Math.round((Number(l.qty) - take) * 1000) / 1000;
-      ops.push({ table: 'stock_lots', row: left > 0 ? { id: l.id, qty: left } : { id: l.id, qty: 0, deleted: 1 } });
-    }
-    // consumo registrato: serve a previsione esaurimento e statistiche
-    ops.push({ table: 'events', row: { type: 'consumo', product_id: product.id, qty: Math.round((-diff - toTake) * 1000) / 1000, unit: product.default_unit, value: known ? Math.round(value * 100) / 100 : null, date: todayISO() } });
-  }
+  } else ops.push(...consumeOps(product, -diff, data, lots));
   await save(ops, `${product.name}: ${fmtQty(current)} → ${fmtQty(target)}`);
   await autoAddBelowStock();
+}
+
+// Operazioni per consumare qty (unita' del prodotto) dai lotti piu' vicini a scadere + evento "consumo".
+export function consumeOps(product, qty, data, lots = null) {
+  lots =
+    lots ||
+    data.lots
+      .filter((l) => l.product_id === product.id)
+      .sort((a, b) => {
+        const la = lotLimit(a, product);
+        const lb = lotLimit(b, product);
+        return (la ? la.getTime() : Infinity) - (lb ? lb.getTime() : Infinity);
+      });
+  const ops = [];
+  let toTake = Math.round(qty * 1000) / 1000;
+  let value = 0;
+  let known = false;
+  for (const l of lots) {
+    if (toTake <= 0) break;
+    const take = Math.min(Number(l.qty), toTake);
+    toTake -= take;
+    const v = lotValue(l, take, data);
+    if (v != null) {
+      value += v;
+      known = true;
+    }
+    const left = Math.round((Number(l.qty) - take) * 1000) / 1000;
+    ops.push({ table: 'stock_lots', row: left > 0 ? { id: l.id, qty: left } : { id: l.id, qty: 0, deleted: 1 } });
+  }
+  const done = Math.round((qty - Math.max(0, toTake)) * 1000) / 1000;
+  // consumo registrato: serve a previsione esaurimento e statistiche
+  if (done > 0) ops.push({ table: 'events', row: { type: 'consumo', product_id: product.id, qty: done, unit: product.default_unit, value: known ? Math.round(value * 100) / 100 : null, date: todayISO() } });
+  return ops;
 }
 
 // Valore in euro di una quantita' di un lotto: prezzo della sua riga d'acquisto, altrimenti ultimo prezzo pagato.

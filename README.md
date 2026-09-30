@@ -217,6 +217,12 @@ Sostituisce i tag AI liberi della 0.10 (quei tag ora sono nascosti per non dupli
 - **Catalogo**: pulsante fisso "Durate e porzioni".
 - Migrazione `0009_classificazione.sql`: PRIMA del push.
 
+## Alimenti nei pasti e preferite ★5 (0.13.0)
+
+- **Alimento** (tab in Aggiungi piatto / Cosa ho mangiato): frutta, verdura, dolce, snack, latticini, pane/cracker, altro. Dalla dispensa (scala la quantità: 1 uso, 1 pz, 100 g o 125 ml per porzione, modificabile) o scritto libero. Salvato in `meal_plan` con `dish_features = 'alimento'`, `note` = nome, `dish_course` = tipo, `dish_main` = "conta come", `servings` = quanti, `dish_ings` = prodotto.
+- Obiettivi: gli alimenti contano per la loro base (frutta → Frutta e Giorni con frutta; verdura → Verdure, anche a pranzo e a cena); "2 mele" = 2. Un pasto con soli alimenti non conta come pasto a casa/fuori/delivery.
+- **Preferite** = ricette con ★★★★★ (gradimento). Tolto il toggle "Preferita". Migrazione `0011` converte le vecchie preferite senza voto in ★5.
+
 ## Diario pasti e varietà (0.12.0)
 
 - **Diario**: ogni riga `meal_plan` è un piatto; `done = 1` = mangiato. Tipi di piatto: ricetta (`recipe_id`), avanzo (`leftover_of`), scritto a mano (`note` + `dish_course`, `dish_main`, `dish_second`, `dish_features`, `dish_ings` fino a 3 prodotti). `auto = 1` = proposta di "Riempi". `used_expiring` = ingredienti in scadenza usati.

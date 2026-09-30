@@ -6,11 +6,11 @@ import { FoodSelect } from '../pages/TagAI.jsx';
 import { apiFetch } from '../api/client.js';
 import { showToast } from '../hooks/useData.js';
 import { undo, save } from '../db/repo.js';
-import { setTotalQty, euro, fmtQty, todayISO } from '../db/logic.js';
+import { setTotalQty, euro, fmtQty, todayISO, usesOf } from '../db/logic.js';
 import { COURSES } from '../db/tags.js';
 import { recipeCost } from '../db/insights.js';
-import { MEALS_ALL, PLACES, OUT_PLACES, GOAL_DEFS, ruleLabel, mealId, addDaysIso, weekStartIso, periodContext, evaluate, daysBetween, isoDay } from '../db/variety.js';
-import { addDish, rankRecipes, mealOps, getSetting, saveSetting, goalsOf, weekEval, monthEval, doneDishes } from '../db/meals.js';
+import { ITEM_KINDS, ITEM_BY_ID, itemKindOf, MEALS_ALL, PLACES, OUT_PLACES, GOAL_DEFS, ruleLabel, mealId, addDaysIso, weekStartIso, periodContext, evaluate, daysBetween, isoDay } from '../db/variety.js';
+import { addDish, addItem, rankRecipes, mealOps, getSetting, saveSetting, goalsOf, weekEval, monthEval, doneDishes } from '../db/meals.js';
 
 // Colori per base (stessi nei due temi, leggibili su scuro e chiaro)
 export const BASE_COLOR = { Carboidrati: '#d9a441', Carne: '#e0605a', Pesce: '#4aa3d8', Uova: '#e2c84f', Verdure: '#5fbf7a', Frutta: '#f08bb4', Latticini: '#b9a4f0', Proteine: '#b07a4a' };
@@ -72,7 +72,8 @@ export function AddDishModal({ rec, data, date, meal: meal0, done, onClose }) {
   const cur = rec.meals[mealId(date, meal)];
   const [place, setPlace] = useState(cur?.place || 'casa');
   const [cost, setCost] = useState(cur?.cost ?? '');
-  const [tab, setTab] = useState('ricette');
+  const [tab, setTab] = useState(meal0 === 'colazione' || meal0 === 'merenda' ? 'alimento' : 'ricette');
+  const [item, setItem] = useState({ kind: 'frutta', product: null, name: '', main: undefined, n: 1, scala: true, qty: '' });
   const [q, setQ] = useState('');
   const [pick, setPick] = useState(null);
   const [servings, setServings] = useState(1);
@@ -96,6 +97,28 @@ export function AddDishModal({ rec, data, date, meal: meal0, done, onClose }) {
       setHand({ note: '', dish_course: '', ings: [], main: null, second: null, fritto: false });
     } else onClose();
   }
+  // quantita' da scalare per n porzioni, nell'unita' del prodotto
+  const itemQty = (p, n) => {
+    if (!p) return 0;
+    const u = usesOf(p);
+    const per = u ? 1 / u : ['g', 'ml'].includes(p.default_unit) ? (p.default_unit === 'g' ? 100 : 125) : ['kg', 'l'].includes(p.default_unit) ? 0.1 : 1;
+    return Math.round(per * n * 1000) / 1000;
+  };
+  const itemStock = item.product ? data.stock[item.product.id] || 0 : 0;
+  async function commitItem(keepOpen) {
+    setBusy(true);
+    const c = place !== 'casa' ? numOrNull(cost) : null;
+    const used = item.product && item.scala && itemStock > 0 ? Math.min(itemStock, numOrNull(item.qty) ?? itemQty(item.product, item.n)) : 0;
+    await addItem({ rec, data, date, meal, kind: item.kind, name: item.name.trim(), product: item.product, main: item.main, usedQty: used, n: item.n, done, place, cost: place !== 'casa' || cur?.cost ? c : undefined });
+    showToast(`${mealLabel(meal)}: ${item.name.trim()}${used ? ' (scalato dalla dispensa)' : ''}`, { label: 'Annulla', run: () => undo() });
+    setBusy(false);
+    if (keepOpen) setItem((it) => ({ ...it, product: null, name: '', main: undefined, n: 1, qty: '' }));
+    else onClose();
+  }
+  const pickItem = (p) => setItem((it) => ({ ...it, product: p, name: p.name, kind: itemKindOf(p), main: undefined, qty: '' }));
+  const itemKind = ITEM_BY_ID[item.kind];
+  const itemMain = item.main !== undefined ? item.main : item.kind === 'altro' || item.kind === 'verdura' || item.kind === 'latticini' ? (item.product ? guessBase([item.product])[0] : null) ?? itemKind.main : itemKind.main;
+
   async function eatLeftover(x, keepOpen) {
     await setTotalQty(x.p, Math.max(0, (data.stock[x.p.id] || 0) - 1), data);
     await commit({ leftover_of: rec.byId[x.rid] ? x.rid : null, note: rec.byId[x.rid] ? null : x.p.name }, keepOpen);
@@ -128,9 +151,11 @@ export function AddDishModal({ rec, data, date, meal: meal0, done, onClose }) {
             {MEALS_ALL.filter((m) => extra || !m.extra || m.id === meal).map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
           </Select>
         </Field>
-        <Field label="Porzioni">
-          <Stepper value={servings} unit="porz." min={1} onChange={(v) => setServings(Math.max(1, v))} />
-        </Field>
+        {tab !== 'alimento' && (
+          <Field label="Porzioni">
+            <Stepper value={servings} unit="porz." min={1} onChange={(v) => setServings(Math.max(1, v))} />
+          </Field>
+        )}
       </div>
       <PlaceCost place={place} cost={cost} onPlace={setPlace} onCost={setCost} />
       <Tabs
@@ -138,6 +163,7 @@ export function AddDishModal({ rec, data, date, meal: meal0, done, onClose }) {
         onChange={setTab}
         tabs={[
           { value: 'ricette', label: 'Ricettario' },
+          { value: 'alimento', label: 'Alimento' },
           { value: 'mano', label: 'Scritto a mano' },
           { value: 'avanzi', label: 'Avanzi', count: leftovers.length || undefined },
         ]}
@@ -176,6 +202,54 @@ export function AddDishModal({ rec, data, date, meal: meal0, done, onClose }) {
             </ul>
           </>
         ))}
+      {tab === 'alimento' && (
+        <div className="space-y-3">
+          <p className="text-xs text-text-muted">Frutta, verdura, dolci, snack… come parte del pasto. Conta negli obiettivi della sua categoria.</p>
+          <div className="flex flex-wrap gap-1.5">
+            {ITEM_KINDS.map((k) => (
+              <button key={k.id} type="button" onClick={() => setItem((it) => ({ ...it, kind: k.id, main: undefined }))} className={`rounded-full border px-3 py-1 text-sm ${item.kind === k.id ? 'bg-brand text-brand-on border-brand' : 'border-bg-border bg-bg-elevated'}`}>
+                {k.label}
+              </button>
+            ))}
+          </div>
+          {item.name ? (
+            <div className="flex items-center gap-2 rounded-md border border-bg-border bg-bg-elevated px-3 py-2">
+              <span className="flex-1 min-w-0 truncate font-semibold">{item.name}</span>
+              <span className="text-xs text-text-muted">{item.product ? `in dispensa: ${fmtQty(itemStock)} ${item.product.default_unit}` : 'non in dispensa'}</span>
+              <Button variant="text" onClick={() => setItem((it) => ({ ...it, product: null, name: '', main: undefined }))}>cambia</Button>
+            </div>
+          ) : (
+            <ProductPicker products={data.products} area="cibo" prefer={itemKind.cat || undefined} onPick={pickItem} onCreate={(name) => setItem((it) => ({ ...it, product: null, name }))} placeholder="Cerca o scrivi (es. mela, yogurt, cioccolato)…" />
+          )}
+          {item.name && (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Quanti">
+                  <Stepper value={item.n} unit="porz." min={1} onChange={(v) => setItem((it) => ({ ...it, n: Math.max(1, v), qty: '' }))} />
+                </Field>
+                <Field label="Conta come">
+                  <FoodSelect value={itemMain} onChange={(v) => setItem((it) => ({ ...it, main: v }))} placeholder="nessun obiettivo" aria-label="Conta come" />
+                </Field>
+              </div>
+              {item.product && itemStock > 0 && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Toggle checked={item.scala} onChange={(v) => setItem((it) => ({ ...it, scala: v }))} label="Scala dalla dispensa" />
+                  {item.scala && (
+                    <span className="inline-flex items-center gap-1 text-sm">
+                      <input className="w-20 rounded-md bg-bg-elevated border border-bg-border px-2 py-1.5 focus:outline-none focus:border-brand" inputMode="decimal" value={item.qty} placeholder={String(itemQty(item.product, item.n))} onChange={(e) => setItem((it) => ({ ...it, qty: e.target.value }))} aria-label="Quantità da scalare" />
+                      {item.product.default_unit}
+                    </span>
+                  )}
+                </div>
+              )}
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button variant="ghost" disabled={busy} onClick={() => commitItem(true)}><Plus size={16} /> Aggiungi e continua</Button>
+                <Button disabled={busy} onClick={() => commitItem()}>Aggiungi</Button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
       {tab === 'avanzi' &&
         (leftovers.length === 0 ? (
           <Empty icon={Package}>Nessun avanzo in dispensa.</Empty>

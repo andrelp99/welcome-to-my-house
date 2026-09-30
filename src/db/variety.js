@@ -57,6 +57,8 @@ export function toDish(entry, recipe, meal, courseOf) {
     feats: new Set(list(r ? r.features : entry.dish_features)),
     usedExpiring: Number(entry.used_expiring) || 0,
     rating: r ? Number(r.rating) || null : null,
+    item: !r && list(entry.dish_features).includes('alimento'),
+    n: !r && list(entry.dish_features).includes('alimento') ? Math.max(1, Math.round(Number(entry.servings) || 1)) : 1, // alimenti: 2 frutti = 2
   };
 }
 const grp = (v) => (v ? String(v).split('|')[0] : null);
@@ -65,10 +67,37 @@ export const has = (dish, key) => [dish.main, dish.second].some((v) => v && (key
 const isVeg = (d) => has(d, 'Verdure|ortaggi') || has(d, 'Verdure|funghi') || (has(d, 'Verdure') && !has(d, 'Verdure|frutta')) || d.course === 'Contorno';
 const isMeat = (d) => has(d, 'Carne');
 
+// ── Alimenti singoli (frutta, verdura, dolci, snack…) aggiunti a un pasto ──
+// Salvati come piatto con dish_features "alimento": contano negli obiettivi come la loro categoria.
+export const ITEM_KINDS = [
+  { id: 'frutta', label: 'Frutta', course: 'Frutta', main: 'Verdure|frutta', cat: 'cat-frutta' },
+  { id: 'verdura', label: 'Verdura', course: 'Contorno', main: 'Verdure|ortaggi', cat: 'cat-verdura' },
+  { id: 'dolce', label: 'Dolce', course: 'Dolce', main: null, cat: 'cat-colazione' },
+  { id: 'snack', label: 'Snack', course: 'Snack', main: null, cat: 'cat-colazione' },
+  { id: 'latticini', label: 'Latticini', course: 'Latticini', main: 'Latticini|yogurt', cat: 'cat-latte' },
+  { id: 'pane', label: 'Pane / cracker', course: 'Pane e lievitati', main: null, cat: 'cat-pane' },
+  { id: 'altro', label: 'Altro', course: null, main: null, cat: null },
+];
+export const ITEM_BY_ID = Object.fromEntries(ITEM_KINDS.map((k) => [k.id, k]));
+export const itemKindOfCourse = (c) => ITEM_KINDS.find((k) => k.course === c && k.id !== 'altro') || ITEM_BY_ID.altro;
+// Tipo dedotto dal prodotto (categoria + nome)
+export function itemKindOf(p) {
+  if (!p) return 'frutta';
+  const n = String(p.name || '').toLowerCase();
+  const c = p.category_id;
+  if (c === 'cat-frutta') return /mandorl|noci|nocciol|pistacch|arachid|anacard|frutta secca/.test(n) ? 'snack' : 'frutta';
+  if (c === 'cat-verdura') return 'verdura';
+  if (c === 'cat-latte' || c === 'cat-formaggi') return 'latticini';
+  if (c === 'cat-pane') return /biscott|brioche|cornett|torta/.test(n) ? 'dolce' : 'pane';
+  if (c === 'cat-colazione') return /cracker|patatin|grissin|tarall|salatin|pop ?corn|mandorl|noci|arachid|barrett|gallett|chips/.test(n) ? 'snack' : 'dolce';
+  if (/gelat|cioccol|biscott|torta|budin|merendin/.test(n)) return 'dolce';
+  return 'altro';
+}
+
 // ── Obiettivi ──
 // match(dish) = il piatto conta (usato anche per capire se una ricetta "aiuta" o "sfora").
 // count(ctx) per quelli che non contano piatti (pasti, giorni, ricette, eventi).
-const perDish = (match) => ({ match, count: (c) => c.dishes.filter(match).length });
+const perDish = (match) => ({ match, count: (c) => c.dishes.filter(match).reduce((t, d) => t + (d.n || 1), 0) });
 export const GOAL_DEFS = [
   { id: 'pesce', label: 'Pesce', period: 'week', min: 2, group: 'Proteine', ...perDish((d) => has(d, 'Pesce')) },
   { id: 'legumi', label: 'Legumi', period: 'week', min: 1, group: 'Proteine', ...perDish((d) => has(d, 'Proteine|legumi')) },
@@ -88,9 +117,9 @@ export const GOAL_DEFS = [
   { id: 'frutta', label: 'Frutta', period: 'week', min: 5, group: 'Frutta', ...perDish((d) => has(d, 'Verdure|frutta')) },
   { id: 'giornifrutta', label: 'Giorni con frutta', period: 'week', min: 4, unit: 'giorni', group: 'Frutta', count: (c) => c.days.filter((day) => day.dishes.some((d) => has(d, 'Verdure|frutta'))).length },
   { id: 'fritto', label: 'Fritto', period: 'week', max: 1, group: 'Stile e fuori casa', ...perDish((d) => d.feats.has('fritto')) },
-  { id: 'fuori', label: 'Pasti fuori', period: 'week', max: 3, unit: 'pasti', group: 'Stile e fuori casa', count: (c) => c.mealsWithDishes.filter((m) => OUT_PLACES.includes(m.place)).length },
-  { id: 'delivery', label: 'Delivery', period: 'week', max: 2, unit: 'pasti', group: 'Stile e fuori casa', count: (c) => c.mealsWithDishes.filter((m) => m.place === 'delivery').length },
-  { id: 'casa', label: 'Pasti cucinati a casa', period: 'week', min: 8, unit: 'pasti', group: 'Stile e fuori casa', count: (c) => c.mealsWithDishes.filter((m) => m.place === 'casa' && (m.meal === 'pranzo' || m.meal === 'cena')).length },
+  { id: 'fuori', label: 'Pasti fuori', period: 'week', max: 3, unit: 'pasti', group: 'Stile e fuori casa', count: (c) => c.realMeals.filter((m) => OUT_PLACES.includes(m.place)).length },
+  { id: 'delivery', label: 'Delivery', period: 'week', max: 2, unit: 'pasti', group: 'Stile e fuori casa', count: (c) => c.realMeals.filter((m) => m.place === 'delivery').length },
+  { id: 'casa', label: 'Pasti cucinati a casa', period: 'week', min: 8, unit: 'pasti', group: 'Stile e fuori casa', count: (c) => c.realMeals.filter((m) => m.place === 'casa' && (m.meal === 'pranzo' || m.meal === 'cena')).length },
   { id: 'scadenze', label: 'Ricette con cose in scadenza', period: 'week', min: 2, group: 'Anti-spreco', count: (c) => c.dishes.filter((d) => d.usedExpiring > 0).length },
   { id: 'buttati', label: 'Prodotti buttati', period: 'week', max: 1, unit: 'prodotti', group: 'Anti-spreco', count: (c) => c.events.filter((e) => e.type === 'buttato').length },
   { id: 'diverse', label: 'Ricette diverse', period: 'month', min: 15, unit: 'ricette', group: 'Scoperta', count: (c) => new Set(c.dishes.filter((d) => d.recipe_id && !d.leftover).map((d) => d.recipe_id)).size },
@@ -142,7 +171,8 @@ export function periodContext({ all, mealsById, events = [], recipesById = {}, f
     if (prev && interval && daysBetween(prev, d.date) >= interval) recovered.add(d.id);
     last.set(d.recipe_id, d.date);
   }
-  return { from, to, dishes, days, mealsWithDishes: [...byMeal.values()], events: events.filter((e) => e.date >= from && e.date <= to), firstDone, recovered };
+  const mealsWithDishes = [...byMeal.values()];
+  return { from, to, dishes, days, mealsWithDishes, realMeals: mealsWithDishes.filter((m) => m.dishes.some((d) => !d.item)), events: events.filter((e) => e.date >= from && e.date <= to), firstDone, recovered };
 }
 
 // Valuta gli obiettivi attivi del periodo. today serve a capire quanto del periodo e' passato.

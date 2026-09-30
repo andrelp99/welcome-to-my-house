@@ -3,9 +3,9 @@ import { uuid } from './db.js';
 import { recipeStatus, NO_PRODUCT } from './recipes.js';
 import { courseOf } from './tags.js';
 import { expiringSet, urgentOf } from './insights.js';
-import { todayISO } from './logic.js';
+import { todayISO, consumeOps, autoAddBelowStock } from './logic.js';
 import {
-  toDish, mealId, goalConfig, periodContext, evaluate, scoreRecipe, weekStartIso, addDaysIso, isoDay, DEFAULT_WEIGHTS, OUT_PLACES, MEALS_ALL,
+  toDish, mealId, ITEM_BY_ID, goalConfig, periodContext, evaluate, scoreRecipe, weekStartIso, addDaysIso, isoDay, DEFAULT_WEIGHTS, OUT_PLACES, MEALS_ALL,
 } from './variety.js';
 
 // ── Impostazioni condivise (tabella settings, JSON) ──
@@ -113,6 +113,26 @@ export async function addDish({ rec, date, meal, dish, servings = 1, done, place
   const ops = [{ table: 'meal_plan', row: { id: uuid(), date, meal, servings, done: done ? 1 : 0, auto, ...dish, ...(done ? { done_at: todayISO() } : {}) } }];
   ops.push(...mealOps(date, meal, { place, cost }, rec));
   await save(ops, `Planner: ${dish.note || rec.byId[dish.recipe_id]?.title || rec.byId[dish.leftover_of]?.title || 'piatto'}`);
+}
+
+// Alimento singolo (frutta, verdura, dolce, snack…) nel pasto. Se preso dalla dispensa la scala (usedQty nell'unita' del prodotto).
+// Una sola operazione: si annulla tutto insieme.
+export async function addItem({ rec, data, date, meal, kind, name, product = null, main, usedQty = 0, n = 1, done, place, cost }) {
+  const k = ITEM_BY_ID[kind] || ITEM_BY_ID.altro;
+  const ops = [
+    {
+      table: 'meal_plan',
+      row: {
+        id: uuid(), date, meal, servings: n, done: done ? 1 : 0, auto: 0, note: name,
+        dish_course: k.course, dish_main: main === undefined ? k.main : main, dish_second: null, dish_features: 'alimento', dish_ings: product?.id || null,
+        ...(done ? { done_at: todayISO() } : {}),
+      },
+    },
+  ];
+  if (product && usedQty > 0) ops.push(...consumeOps(product, usedQty, data));
+  ops.push(...mealOps(date, meal, { place, cost }, rec));
+  await save(ops, `${name}${n > 1 ? ` ×${n}` : ''} nel pasto`);
+  if (product && usedQty > 0) await autoAddBelowStock();
 }
 
 // Piatto "da pasto" (per proposte di pranzo/cena): niente contorni, antipasti, dolci, salse, pane, colazioni.

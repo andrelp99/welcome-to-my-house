@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useParams } from 'react-router';
 import { ArrowLeft, ArrowUp, ArrowDown, Trash2, Link2, ClipboardPaste, Plus, Timer, Sparkles } from 'lucide-react';
 import { useData, useRecipes, showToast } from '../hooks/useData.js';
 import { Button, IconButton, Field, Input, Select, Modal, Toggle } from '../components/ui/kit.jsx';
-import { PhotoPicker, LinkModal } from '../components/recipes.jsx';
+import { PhotoPicker, LinkModal, Stars } from '../components/recipes.jsx';
 import { ProductForm } from '../components/forms.jsx';
 import { autoTags, cleanTags, courseOf, COURSES, DIFF_LABEL } from '../db/tags.js';
 import { FoodSelect, FeaturePicker } from './TagAI.jsx';
@@ -14,7 +14,7 @@ import { uuid } from '../db/db.js';
 const num = (v) => (v === '' || v == null ? null : Number(String(v).replace(',', '.')));
 const txtArea = 'w-full rounded-md bg-bg-elevated border border-bg-border px-3 py-2.5 text-text-primary placeholder:text-text-muted focus:outline-none focus:border-brand';
 
-const EMPTY = { title: '', servings: 1, prep_min: '', cook_min: '', rest_min: '', difficulty: '', course: '', main_food: '', second_food: '', features: '', tags: '', diet_tags: '', photo_key: null, source_url: '', notes: '', favorite: 0 };
+const EMPTY = { title: '', servings: 1, prep_min: '', cook_min: '', rest_min: '', difficulty: '', course: '', main_food: '', second_food: '', features: '', tags: '', diet_tags: '', photo_key: null, source_url: '', notes: '', rating: null };
 
 export default function RicettaForm() {
   const { id } = useParams();
@@ -117,7 +117,7 @@ export default function RicettaForm() {
       photo_key: f.photo_key || null,
       source_url: f.source_url.trim() || null,
       notes: f.notes.trim() || null,
-      favorite: f.favorite ? 1 : 0,
+      rating: Number(f.rating) || null,
       deleted: 0,
     };
     const ops = [{ table: 'recipes', row }];
@@ -231,7 +231,10 @@ export default function RicettaForm() {
             ))}
           </div>
         </Field>
-        <Toggle checked={!!f.favorite} onChange={(v) => set('favorite')(v ? 1 : 0)} label="★ Preferita" />
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-sm text-text-secondary">Quanto mi piace <span className="text-text-muted text-xs">· ★★★★★ = preferita</span></span>
+          <Stars value={Number(f.rating) || null} label="Gradimento" onChange={(v) => set('rating')(v)} />
+        </div>
       </section>
 
       <section className="rounded-lg border border-bg-border bg-bg-surface p-4 space-y-3">

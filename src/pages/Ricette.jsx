@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
-import { Plus, Search, Clock, Star, BookOpen, Download, Leaf, CalendarDays, Link2, ChevronRight, Sparkles } from 'lucide-react';
+import { Plus, Search, Clock, BookOpen, Download, Leaf, CalendarDays, Link2, ChevronRight, Sparkles } from 'lucide-react';
 import { recipeSeason, monthName } from '../db/season.js';
 import { useData, useRecipes } from '../hooks/useData.js';
 import { Button, Tabs, Empty, Select } from '../components/ui/kit.jsx';
@@ -68,7 +68,7 @@ export default function Ricette() {
     if (fDiff && auto.difficulty?.value !== fDiff) return false; // valori facile/media/difficile
     if (fTags.length && !fTags.every((t) => tags.includes(t))) return false;
     if (tab === 'ok' && !st.feasible) return false;
-    if (tab === 'fav' && !r.favorite) return false;
+    if (tab === 'fav' && Number(r.rating) !== 5) return false;
     if (diet.length && !diet.every((t) => d.includes(t))) return false;
     if (s) {
       const hay = [r.title, ...tags, ...(rec.ings[r.id] || []).map((i) => i.text)].join(' ').toLowerCase();
@@ -91,7 +91,7 @@ export default function Ricette() {
   const topTags = Object.entries(tagFreq).filter(([, n]) => n > 1).sort((a, b) => b[1] - a[1]).slice(0, 16).map(([t]) => t);
   const unclassified = rows.filter((x) => !x.r.main_food || !x.feats.size).length;
   const activeFilters = fFeat.length + diet.length + (season ? 1 : 0);
-  const counts = { all: rows.length, ok: rows.filter((x) => x.st.feasible).length, fav: rows.filter((x) => x.r.favorite).length };
+  const counts = { all: rows.length, ok: rows.filter((x) => x.st.feasible).length, fav: rows.filter((x) => Number(x.r.rating) === 5).length };
 
   return (
     <div className="space-y-4">
@@ -121,7 +121,7 @@ export default function Ricette() {
         tabs={[
           { value: 'all', label: 'Tutte', count: counts.all },
           { value: 'ok', label: 'Fattibili', count: counts.ok },
-          { value: 'fav', label: '★ Preferite', count: counts.fav },
+          { value: 'fav', label: '★★★★★ Preferite', count: counts.fav },
           { value: 'subs', label: 'Sostituti' },
         ]}
       />
@@ -255,7 +255,6 @@ export default function Ricette() {
                     <Photo id={r.photo_key} className="w-24 h-24 sm:w-full sm:h-36 shrink-0" />
                     <div className="flex-1 min-w-0 py-2 pr-3 sm:p-3 space-y-1">
                       <div className="font-semibold leading-snug line-clamp-2">
-                        {r.favorite ? <Star size={14} className="inline -mt-1 mr-1 fill-brand text-brand" /> : null}
                         {r.title}
                         {r.rating ? <span className="ml-1.5 text-xs text-brand font-normal">★{r.rating}</span> : null}
                       </div>
