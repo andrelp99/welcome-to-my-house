@@ -217,6 +217,22 @@ Sostituisce i tag AI liberi della 0.10 (quei tag ora sono nascosti per non dupli
 - **Catalogo**: pulsante fisso "Durate e porzioni".
 - Migrazione `0009_classificazione.sql`: PRIMA del push.
 
+## Ingredienti per pasto e consumi (0.14.0)
+
+- **Ho cucinato ovunque**: ✓ nel planner, "Cosa ho mangiato → Ricettario", proposte segnate fatte e pagina ricetta aprono lo stesso pannello (`src/components/cook.jsx`, `src/db/cook.js`). Scala solo con luogo **Casa** o **Schiscia**; **Casa Crema**, fuori e mensa vanno solo nel diario.
+  - Rapido "Come da ricetta" oppure "Modifica": quantità, spunte, alternative (sostituti + stessa categoria in casa), "+ ingrediente", per i mancanti "usato comunque / finito → lista spesa / non usato".
+  - Porzioni cucinate (default 1) e mangiate: la differenza diventa avanzo con costo per porzione (`stock_lots.unit_cost`).
+  - Dose tua: dalle ultime 2 volte uguali (per porzione). Giorni passati: eventi con la data del pasto.
+  - Togli ✓ o elimina il piatto → "Rimetto in dispensa?": ripristina i lotti originali (`events.lot_id`), toglie l'avanzo creato.
+  - Scritto a mano: fino a 10 ingredienti con quantità, ★ max 2 = base per gli obiettivi.
+- **Conta rapida**: un calo chiede usati / buttati / correzione (`events.type = 'rettifica'`, non conta).
+- **Dispensa → Consumi** (`src/pages/Consumi.jsx`, `src/db/consumi.js`): Giorno (pasto per pasto, quota mangiata), Periodo (tabella, categorie, costo per pasto casa/schiscia/fuori, costo reale ricette, top e dormienti, CSV), Prodotti (uso medio, finisce tra, prezzi, storico), Bilancio (comprato/usato/buttato, % spreco). Costo del giorno anche nel planner accanto alla data.
+- Valore = prezzo del lotto usato, altrimenti ultimo prezzo convertito nell'unità giusta. Eventi vecchi senza lotto: ricalcolati dall'ultimo prezzo.
+- Notifica domenica: "Ingredienti usati X € · buttati Y €".
+- **Scontrino AI salvato**: appena letto diventa una bozza (`settings` id `scontrino-…`, sincronizzata). Chiudendo con X o "Dopo" resta in Spesa ("Scontrino da confermare · Riprendi / Elimina") con tutte le modifiche fatte; sparisce solo con Registra o Elimina. Niente nuova lettura AI.
+- **Nuovo prodotto → Dispensa cibo o Casa**: scelta in cima al modulo; per i nuovi la propone dal nome (detersivi, shampoo, carta, farmaci, sacchi…), con categoria e luogo di casa.
+- Migrazione `0012`: `events.plan_id/lot_id`, `stock_lots.unit_cost/plan_id`, `meal_plan.cooked/scaled`. Obiettivo "Pasti a casa" conta anche la Schiscia.
+
 ## Alimenti nei pasti e preferite ★5 (0.13.0)
 
 - **Alimento** (tab in Aggiungi piatto / Cosa ho mangiato): frutta, verdura, dolce, snack, latticini, pane/cracker, altro. Dalla dispensa (scala la quantità: 1 uso, 1 pz, 100 g o 125 ml per porzione, modificabile) o scritto libero. Salvato in `meal_plan` con `dish_features = 'alimento'`, `note` = nome, `dish_course` = tipo, `dish_main` = "conta come", `servings` = quanti, `dish_ings` = prodotto.

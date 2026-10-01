@@ -1,4 +1,5 @@
 import { addDays, addMonths, differenceInCalendarDays, parseISO, format } from 'date-fns';
+import { consumeOps, priceOf } from './recipes.js';
 import { db, alive } from './db.js';
 import { save } from './repo.js';
 
@@ -142,6 +143,9 @@ export async function loadAll() {
     lastPriceUnit,
     lastPriceByChain,
     linePrice,
+    lines: liveLines,
+    receipts: R,
+    storesById: S,
     shopping: shopping.filter(alive),
     locationList: Object.values(L).sort((a, b) => a.sort - b.sort),
     categoryList: Object.values(C).sort((a, b) => a.sort - b.sort),
@@ -178,7 +182,8 @@ export async function autoAddBelowStock() {
 }
 
 // Imposta la quantita' totale di un prodotto (conta rapida). Aumenti -> lotto nuovo/ultimo; cali -> consuma dal piu' vicino a scadere.
-export async function setTotalQty(product, target, data) {
+// type per i cali: 'consumo' (usato), 'buttato', 'rettifica' (correzione, non conta).
+export async function setTotalQty(product, target, data, type = 'consumo') {
   const lots = data.lots
     .filter((l) => l.product_id === product.id)
     .sort((a, b) => {
@@ -200,48 +205,20 @@ export async function setTotalQty(product, target, data) {
         table: 'stock_lots',
         row: { product_id: product.id, qty: diff, unit: product.default_unit, location_id: loc, expiry_date: exp, frozen_at: loc === 'loc-freezer' ? todayISO() : null },
       });
-  } else ops.push(...consumeOps(product, -diff, data, lots));
+  } else ops.push(...consumeOps(product, -diff, data, { lots, type }));
   await save(ops, `${product.name}: ${fmtQty(current)} → ${fmtQty(target)}`);
   await autoAddBelowStock();
 }
 
-// Operazioni per consumare qty (unita' del prodotto) dai lotti piu' vicini a scadere + evento "consumo".
-export function consumeOps(product, qty, data, lots = null) {
-  lots =
-    lots ||
-    data.lots
-      .filter((l) => l.product_id === product.id)
-      .sort((a, b) => {
-        const la = lotLimit(a, product);
-        const lb = lotLimit(b, product);
-        return (la ? la.getTime() : Infinity) - (lb ? lb.getTime() : Infinity);
-      });
-  const ops = [];
-  let toTake = Math.round(qty * 1000) / 1000;
-  let value = 0;
-  let known = false;
-  for (const l of lots) {
-    if (toTake <= 0) break;
-    const take = Math.min(Number(l.qty), toTake);
-    toTake -= take;
-    const v = lotValue(l, take, data);
-    if (v != null) {
-      value += v;
-      known = true;
-    }
-    const left = Math.round((Number(l.qty) - take) * 1000) / 1000;
-    ops.push({ table: 'stock_lots', row: left > 0 ? { id: l.id, qty: left } : { id: l.id, qty: 0, deleted: 1 } });
-  }
-  const done = Math.round((qty - Math.max(0, toTake)) * 1000) / 1000;
-  // consumo registrato: serve a previsione esaurimento e statistiche
-  if (done > 0) ops.push({ table: 'events', row: { type: 'consumo', product_id: product.id, qty: done, unit: product.default_unit, value: known ? Math.round(value * 100) / 100 : null, date: todayISO() } });
-  return ops;
-}
-
 // Valore in euro di una quantita' di un lotto: prezzo della sua riga d'acquisto, altrimenti ultimo prezzo pagato.
 export function lotValue(lot, qty, data) {
-  const unit = data.linePrice?.[lot.purchase_line_id] ?? data.lastPrice?.[lot.product_id];
-  return unit != null ? Math.round(unit * qty * 100) / 100 : null;
+  if (lot.unit_cost != null) return Math.round(Number(lot.unit_cost) * qty * 100) / 100;
+  const line = data.linePrice?.[lot.purchase_line_id];
+  if (line != null) return Math.round(line * qty * 100) / 100;
+  // ultimo prezzo pagato: e' per l'unita' della riga d'acquisto, converti dalla unita' del lotto
+  const p = data.products?.[lot.product_id];
+  const v = p ? priceOf({ ...p, default_unit: lot.unit || p.default_unit }, qty, data) : null;
+  return v != null ? Math.round(v * 100) / 100 : null;
 }
 
 // Lotto finito (consumo) o buttato (spreco): toglie il lotto e registra l'evento.
@@ -250,7 +227,7 @@ export async function closeLot(lot, product, data, type = 'consumo') {
   await save(
     [
       { table: 'stock_lots', row: { id: lot.id, qty: 0, deleted: 1 } },
-      { table: 'events', row: { type, product_id: product.id, qty, unit: lot.unit || product.default_unit, value: lotValue(lot, qty, data), date: todayISO() } },
+      { table: 'events', row: { type, product_id: product.id, lot_id: lot.id, qty, unit: lot.unit || product.default_unit, value: lotValue(lot, qty, data), date: todayISO() } },
     ],
     `${type === 'buttato' ? 'Buttato' : 'Finito'} ${product.name}`
   );
@@ -269,4 +246,24 @@ export function euro(v) {
 
 export function stepFor(unit) {
   return unit === 'g' || unit === 'ml' ? 50 : unit === 'kg' || unit === 'l' ? 0.5 : 1;
+}
+
+// Prodotto di casa (pulizia, bagno, carta…) o cibo? Dal nome. null = non si capisce (resta l'area di partenza).
+const AREA_RULES = [
+  [/lavastovigl|brillantant|detersiv|\bpiatti\b(?! di carta)|svelto|nelsen|dixan|chanteclair|smac\b|\bace\b|domestos|\bcif\b|\bvim\b|lysoform|napisan|sgrassat|candeggin|anticalcar|pavimen|vetri|spugn|panno|swiffer|igienizz|disinfett|ammoniaca|alcool denaturato|sapone piatti|scovol/, 'cat-pulizia'],
+  [/bucato|ammorbid|perlana|coccolino|smacchia|lavatrice|profuma ?bucato|additivo/, 'cat-lavanderia'],
+  [/shampoo|pantene|dove\b|nivea|balsamo cap|bagnoschiuma|docciaschiuma|sapone|dentifric|spazzolin|deodorant|rasoi|schiuma da barba|assorbent|salviett|cotton|dischetti|crema (corpo|mani|viso)|filo interdent|collutorio|gel capelli/, 'cat-igiene'],
+  [/carta igien|scottex|rotolon|fazzolett|tovagliol|carta (da )?cucina|asciugatutto/, 'cat-carta'],
+  [/alluminio|pellicola|carta forno|sacchetti gelo|sacchetti freezer|stuzzicadent|stecchini|piatti di carta|bicchieri di plastica|tovaglia/, 'cat-cucina'],
+  [/sacchi|sacchetti (spazzatura|immondizia|umido)|spazzatura/, 'cat-spazzatura'],
+  [/lampadin|\bpile\b|batteri[ae] (aa|aaa)|filtro|nastro adesivo|colla/, 'cat-manutenz'],
+  [/tachipirina|paracetamol|ibuprofen|aspirina|moment|oki|cerott|garz|termometro|farmac|antistaminic|integratore/, 'cat-farmacia'],
+  [/penna|matit|quadern|post-?it|scotch/, 'cat-cancelleria'],
+  [/terriccio|concime|vaso per piante/, 'cat-piante'],
+];
+export function guessArea(name) {
+  const n = String(name || '').toLowerCase();
+  if (n.trim().length < 3) return null;
+  for (const [re, cat] of AREA_RULES) if (re.test(n)) return { area: 'casa', category_id: cat };
+  return null;
 }

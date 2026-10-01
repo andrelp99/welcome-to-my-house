@@ -1,7 +1,7 @@
 import { addDays, format } from 'date-fns';
 import { db, alive } from './db.js';
 import { save } from './repo.js';
-import { lotLimit, todayISO, autoAddBelowStock, fmtQty } from './logic.js';
+import { lotLimit, todayISO, autoAddBelowStock, fmtQty, lotValue } from './logic.js';
 
 // ── Liste semplici salvate come testo "a, b, c" (il sync non gestisce array) ──
 export const parseList = (s) => (Array.isArray(s) ? s : String(s || '').split(',')).map((x) => String(x).trim()).filter(Boolean);
@@ -333,71 +333,54 @@ export async function addMissingToList(recipe, status, data) {
   return ops.length;
 }
 
+// Prezzo di una quantita' (in unita' prodotto) dall'ultimo acquisto; null se non si sa.
+export function priceOf(p, qty, data) {
+  const unitPrice = data.lastPrice?.[p.id];
+  if (unitPrice == null || qty == null) return null;
+  const lineUnit = data.lastPriceUnit?.[p.id] || p.default_unit;
+  const q = normUnit(lineUnit) === normUnit(p.default_unit) ? qty : convert(qty, p.default_unit, lineUnit);
+  return q == null ? null : unitPrice * q;
+}
+
 // Consuma qty (in unita' prodotto) dai lotti piu' vicini alla scadenza.
-function consumeOps(product, qty, data) {
-  const lots = data.lots
-    .filter((l) => l.product_id === product.id)
-    .sort((a, b) => {
-      const la = lotLimit(a, product);
-      const lb = lotLimit(b, product);
-      return (la ? la.getTime() : Infinity) - (lb ? lb.getTime() : Infinity);
-    });
+// Un evento per lotto (lot_id: serve a rimettere in dispensa), con valore = prezzo del lotto.
+// opts: { date, plan_id, recipe_id, type ('consumo' | 'buttato' | 'rettifica'), lots, overflow (registra anche la parte che non risulta in dispensa) }
+export function consumeOps(product, qty, data, opts = {}) {
+  const { date = todayISO(), plan_id = null, recipe_id = null, type = 'consumo', overflow = false, note = null } = opts;
+  const lots =
+    opts.lots ||
+    data.lots
+      .filter((l) => l.product_id === product.id)
+      .sort((a, b) => {
+        const la = lotLimit(a, product);
+        const lb = lotLimit(b, product);
+        return (la ? la.getTime() : Infinity) - (lb ? lb.getTime() : Infinity);
+      });
   const ops = [];
-  let toTake = qty;
+  const unit = product.default_unit;
+  const ev = (row) => ops.push({ table: 'events', row: { type, product_id: product.id, recipe_id, plan_id, unit, date, note, ...row } });
+  let toTake = Math.round(qty * 1000) / 1000;
   for (const l of lots) {
     if (toTake <= 1e-9) break;
-    const lotQty = convert(Number(l.qty), l.unit, product.default_unit);
+    const lotQty = convert(Number(l.qty), l.unit, unit);
     if (lotQty == null || lotQty <= 0) continue;
-    const take = Math.min(lotQty, toTake);
+    const take = Math.round(Math.min(lotQty, toTake) * 1000) / 1000;
     toTake -= take;
-    const leftInLotUnit = Math.round(convert(lotQty - take, product.default_unit, l.unit) * 1000) / 1000;
+    const takeLot = convert(take, unit, l.unit);
+    const leftInLotUnit = Math.round((Number(l.qty) - takeLot) * 1000) / 1000;
     ops.push({ table: 'stock_lots', row: leftInLotUnit > 0 ? { id: l.id, qty: leftInLotUnit } : { id: l.id, qty: 0, deleted: 1 } });
+    const v = type === 'rettifica' ? null : lotValue(l, takeLot, data);
+    ev({ lot_id: l.id, qty: take, value: v });
+  }
+  toTake = Math.round(toTake * 1000) / 1000;
+  if (overflow && toTake > 0) {
+    // usato ma non risultava in dispensa: valore dall'ultimo prezzo pagato
+    const v = priceOf(product, toTake, data);
+    ev({ lot_id: null, qty: toTake, value: v != null ? Math.round(v * 100) / 100 : null, note: note || 'oltre dispensa' });
   }
   return ops;
 }
 
-// "Ho cucinato": scala la dispensa, registra eventi, crea avanzi in frigo/freezer.
-// uses: [{ product, qty }] in unita' prodotto. leftovers: { portions, location_id }
-export async function cookRecipe({ recipe, servings, uses, leftovers, data, extraOps = [] }) {
-  const date = todayISO();
-  const ops = [];
-  for (const { product, qty } of uses) {
-    if (!(qty > 0)) continue;
-    ops.push(...consumeOps(product, qty, data));
-    const price = data.lastPrice[product.id];
-    ops.push({
-      table: 'events',
-      row: { type: 'consumo', product_id: product.id, recipe_id: recipe.id, qty, unit: product.default_unit, value: price != null ? Math.round(price * qty * 100) / 100 : null, date },
-    });
-  }
-  ops.push({ table: 'events', row: { type: 'cucinato', recipe_id: recipe.id, qty: servings, unit: 'porz', date } });
-  ops.push({ table: 'recipes', row: { id: recipe.id, cooked_count: (recipe.cooked_count || 0) + 1, last_cooked_at: date } });
-
-  if (leftovers?.portions > 0) {
-    const pid = `p-avanzo-${recipe.id}`;
-    const freezer = leftovers.location_id === 'loc-freezer';
-    ops.push({
-      table: 'products',
-      row: { id: pid, name: `Avanzo: ${recipe.title}`, area: 'cibo', category_id: 'cat-avanzi', default_unit: 'pz', default_location_id: 'loc-frigo', freezer_max_months: 3, deleted: 0 },
-    });
-    ops.push({
-      table: 'stock_lots',
-      row: {
-        product_id: pid,
-        qty: leftovers.portions,
-        unit: 'pz',
-        location_id: leftovers.location_id,
-        expiry_date: freezer ? null : format(addDays(new Date(), 3), 'yyyy-MM-dd'),
-        frozen_at: freezer ? date : null,
-        is_leftover: 1,
-        note: `${fmtQty(leftovers.portions)} porzioni`,
-      },
-    });
-  }
-  ops.push(...extraOps);
-  await save(ops, `Cucinato: ${recipe.title}`);
-  await autoAddBelowStock();
-}
 
 // Quantita' proposte per "Ho cucinato" (solo cio' che e' convertibile nell'unita' del prodotto).
 export function proposedUses(status) {

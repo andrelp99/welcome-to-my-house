@@ -3,7 +3,8 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { ArrowLeft, Pencil, Clock, Flame, Hourglass, Gauge, ChefHat, UtensilsCrossed, ShoppingCart, Share2, FileDown, Trash2, Timer, ExternalLink, Plus } from 'lucide-react';
 import { useData, useRecipes, showToast } from '../hooks/useData.js';
 import { Button, IconButton, Stepper, Empty } from '../components/ui/kit.jsx';
-import { Photo, IngredientList, CookedModal, LinkModal, Stars, freqText } from '../components/recipes.jsx';
+import { Photo, IngredientList, LinkModal, Stars, freqText } from '../components/recipes.jsx';
+import { CookModal } from '../components/cook.jsx';
 import { recipeHistory } from '../db/meals.js';
 import { PLACES, daysBetween } from '../db/variety.js';
 import { todayISO } from '../db/logic.js';
@@ -55,6 +56,10 @@ export default function RicettaDettaglio() {
   const urgent = urgentOf(ings, expiringSet(data), data);
   const hist = recipeHistory(rec, id);
   const lastAgo = hist.length ? daysBetween(hist[0].date, todayISO()) : null;
+  // costo reale (prezzi dei lotti usati) per porzione cucinata
+  const cookEvs = rec.events.filter((e) => e.type === 'cucinato' && e.recipe_id === id && Number(e.value) > 0 && Number(e.qty) > 0).sort((a, b) => b.date.localeCompare(a.date));
+  const realCost = cookEvs.length ? { last: Number(cookEvs[0].value) / Number(cookEvs[0].qty), avg: cookEvs.reduce((t, e) => t + Number(e.value) / Number(e.qty), 0) / cookEvs.length } : null;
+  const costByPlan = Object.fromEntries(cookEvs.filter((e) => e.plan_id).map((e) => [e.plan_id, Number(e.value) / Number(e.qty)]));
   const cost = recipeCost(ings, scale, data);
   const nutri = nutritionOf(recipe);
   const feats = featuresOf(recipe, { kcal: nutri?.kcal ?? null, cost: recipeCost(ings, 1 / (recipe.servings || 1), data) });
@@ -162,13 +167,14 @@ export default function RicettaDettaglio() {
               {hist.length > 0 && (
                 <button type="button" className="ml-2 text-brand font-semibold" onClick={() => setShowHist((v) => !v)}>{showHist ? 'nascondi' : 'storico'}</button>
               )}
+              {realCost && <div>Costo reale: ultima volta <b className="text-text-secondary">{euro(realCost.last)}/porz.</b>{cookEvs.length > 1 ? ` · media ${euro(realCost.avg)}` : ''}</div>}
             </div>
             {showHist && (
               <ul className="text-xs text-text-secondary divide-y divide-bg-border">
                 {hist.slice(0, 12).map((h) => (
                   <li key={h.id} className="flex justify-between py-1">
                     <span>{new Date(`${h.date}T12:00:00`).toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short', year: '2-digit' })} · {h.meal}{h.leftover_of ? ' · avanzo' : ''}</span>
-                    <span>{PLACES.find((p) => p.id === h.place)?.label}</span>
+                    <span>{costByPlan[h.id] ? `${euro(costByPlan[h.id])}/porz. · ` : ''}{PLACES.find((p) => p.id === h.place)?.label}</span>
                   </li>
                 ))}
               </ul>
@@ -273,7 +279,7 @@ export default function RicettaDettaglio() {
         </section>
       )}
 
-      {cooked && <CookedModal recipe={recipe} status={status} servings={servings || 1} data={data} rec={rec} planId={planId} urgent={urgent.length} onClose={() => setCooked(false)} />}
+      {cooked && <CookModal recipe={recipe} entry={(planId && rec.plan.find((e) => e.id === planId && !e.scaled)) || null} servings={servings || 1} data={data} rec={rec} urgent={urgent.length} onClose={() => setCooked(false)} />}
       {linking && (
         <LinkModal
           ing={linking}

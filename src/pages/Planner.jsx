@@ -5,6 +5,9 @@ import { ChevronLeft, ChevronRight, Plus, ShoppingCart, Trash2, Check, PenLine, 
 import { useData, useRecipes, showToast } from '../hooks/useData.js';
 import { Button, IconButton, Modal, Field, Toggle, Select, Empty } from '../components/ui/kit.jsx';
 import { AddDishModal, MealModal, VarietyDashboard, Analyses } from '../components/diary.jsx';
+import { CookModal, RestoreModal } from '../components/cook.jsx';
+import { needsCook } from '../db/cook.js';
+import { dayCost } from '../db/consumi.js';
 import { MEALS_ALL, PLACES, mealId, itemKindOfCourse } from '../db/variety.js';
 import { getSetting, saveSetting, proposeFor, saveProposals, removeProposals } from '../db/meals.js';
 import { foodLabel } from '../db/tags.js';
@@ -26,6 +29,8 @@ export default function Planner() {
   const [fill, setFill] = useState(false);
   const [review, setReview] = useState(null);
   const [showAn, setShowAn] = useState(false);
+  const [cooking, setCooking] = useState(null); // piatto da segnare mangiato con ingredienti
+  const [restoring, setRestoring] = useState(null); // { entry, remove }
   const todayRef = useRef(null);
   const scrolled = useRef(false);
   useEffect(() => {
@@ -111,6 +116,14 @@ export default function Planner() {
               <h2 className="font-bold capitalize flex items-center gap-2">
                 {dayLabel(d, { weekday: 'long', day: 'numeric' })}
                 {isToday && <span className="rounded-full bg-brand text-brand-on px-2 py-0.5 text-[10px] uppercase">oggi</span>}
+                {(() => {
+                  const c = di <= today ? dayCost(rec, data, di) : 0;
+                  return c > 0 ? (
+                    <Link to={`/dispensa?vista=consumi&giorno=${di}`} className="ml-auto text-xs font-semibold normal-case text-text-secondary tabular-nums hover:text-brand" title="Ingredienti dei pasti di questo giorno">
+                      {euro(c)}
+                    </Link>
+                  ) : null;
+                })()}
               </h2>
               {meals.map((m) => {
                 const list = entries.filter((e) => e.date === di && e.meal === m.id);
@@ -161,12 +174,21 @@ export default function Planner() {
                               {!e.done && status[e.id] && <StatusChip st={status[e.id]} />}
                             </div>
                           </div>
-                          <IconButton label={e.done ? 'Non mangiato' : 'Mangiato'} onClick={() => put('meal_plan', { id: e.id, done: e.done ? 0 : 1, done_at: e.done ? null : today })}>
+                          <IconButton
+                            label={e.done ? 'Non mangiato' : 'Mangiato'}
+                            onClick={() => {
+                              const pl = rec.meals[mealId(e.date, e.meal)]?.place || 'casa';
+                              if (e.done && e.scaled) return setRestoring({ entry: e, remove: false });
+                              if (!e.done && needsCook(e, pl)) return setCooking(e);
+                              put('meal_plan', { id: e.id, done: e.done ? 0 : 1, done_at: e.done ? null : today });
+                            }}
+                          >
                             <Check size={16} className={e.done ? 'text-positive' : ''} />
                           </IconButton>
                           <IconButton
                             label="Togli"
                             onClick={async () => {
+                              if (e.scaled) return setRestoring({ entry: e, remove: true });
                               await remove('meal_plan', e.id, 'Tolto dal planner');
                               showToast('Tolto dal planner', { label: 'Annulla', run: () => undo() });
                             }}
@@ -184,6 +206,8 @@ export default function Planner() {
         })}
       </div>
 
+      {cooking && <CookModal rec={rec} data={data} recipe={(cooking.recipe_id && rec.byId[cooking.recipe_id]) || null} entry={cooking} servings={cooking.servings} onClose={() => setCooking(null)} />}
+      {restoring && <RestoreModal rec={rec} data={data} entry={restoring.entry} remove={restoring.remove} onClose={() => setRestoring(null)} />}
       {adding && <AddDishModal rec={rec} data={data} date={adding.date} meal={adding.meal} done={adding.done} onClose={() => setAdding(null)} />}
       {mealEdit && <MealModal rec={rec} date={mealEdit.date} meal={mealEdit.meal} onClose={() => setMealEdit(null)} />}
       {fill && <FillModal rec={rec} data={data} days={days.map(iso)} meals={meals} onClose={() => setFill(false)} />}

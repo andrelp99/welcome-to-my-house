@@ -148,7 +148,7 @@ async function weekRecap(db: D1Database, today: string) {
     all(db, 'SELECT * FROM meal_plan WHERE deleted = 0 AND done = 1 AND date >= ? AND date <= ?', from, to),
     all(db, 'SELECT id, title, course, main_food, second_food, features, rating, want_freq FROM recipes WHERE deleted = 0'),
     all(db, 'SELECT * FROM meals WHERE deleted = 0 AND date >= ? AND date <= ?', from, to),
-    all(db, "SELECT type, date FROM events WHERE deleted = 0 AND date >= ? AND date <= ?", from, to),
+    all(db, "SELECT type, date, product_id, value, lot_id, plan_id FROM events WHERE deleted = 0 AND date >= ? AND date <= ?", from, to),
     db.prepare("SELECT value FROM settings WHERE id = 'goals' AND deleted = 0").first<{ value: string }>(),
   ]);
   const R = Object.fromEntries(recipes.map((r) => [r.id, r]));
@@ -177,6 +177,11 @@ async function weekRecap(db: D1Database, today: string) {
   const out = [`Varietà ${ev.score}/100 · ${ev.okCount}/${ev.rows.length} obiettivi`];
   if (todo.length) out.push(`Mancati: ${todo.slice(0, 4).join(', ')}${todo.length > 4 ? '…' : ''}`);
   if (over.length) out.push(`Oltre il limite: ${over.join(', ')}`);
+  // ingredienti usati (avanzi esclusi: gia' contati quando li hai cucinati) e buttati; solo eventi 0.14+ (con lotto o pasto)
+  const sumOf = (t: string) => events.filter((e: any) => e.type === t && (e.lot_id || e.plan_id) && !String(e.product_id || '').startsWith('p-avanzo-')).reduce((s: number, e: any) => s + (Number(e.value) || 0), 0);
+  const used = sumOf('consumo');
+  const wasted = sumOf('buttato');
+  if (used || wasted) out.push(`Ingredienti usati ${euro(used)} · buttati ${euro(wasted)}`);
   const outMeals = meals.filter((m) => OUT_PLACES.includes(m.place) && dishes.some((d: any) => d.date === m.date && d.meal === m.meal));
   if (outMeals.length) out.push(`Pasti fuori ${outMeals.length}${outMeals.some((m) => m.cost) ? ` · ${euro(outMeals.reduce((s, m) => s + (m.cost || 0), 0))}` : ''}`);
   if (missing.length) out.push(`Da registrare: ${missing.slice(0, 5).join(', ')}${missing.length > 5 ? ` +${missing.length - 5}` : ''}`);

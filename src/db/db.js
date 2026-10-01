@@ -45,6 +45,11 @@ db.version(5).stores({
   settings: 'id',
 });
 
+// 0.14: consumi legati al pasto
+db.version(6).stores({
+  events: 'id, type, date, product_id, recipe_id, plan_id',
+});
+
 export const SYNC_TABLES = [
   'locations', 'categories', 'stores', 'products', 'receipts',
   'purchase_lines', 'stock_lots', 'shopping_items', 'extra_expenses', 'budgets',

@@ -1,9 +1,35 @@
 import { apiFetch } from '../api/client.js';
-import { db, alive } from './db.js';
+import { db, alive, uuid } from './db.js';
+import { save } from './repo.js';
 import { addPhoto, fileToDataUrl } from './photos.js';
 import { matchProduct, convert, niceQty } from './recipes.js';
 
-// Scontrino con l'AI: foto -> bozza di check-in da rivedere (niente viene salvato senza conferma).
+// Scontrino con l'AI: foto -> bozza di check-in da rivedere (niente entra in dispensa senza conferma).
+// 0.14: la bozza letta resta salvata (tabella settings, id "scontrino-…", sincronizzata) finche' non la registri o la elimini:
+// chiudere con la X non butta la lettura (e i token).
+export const DRAFT_PREFIX = 'scontrino-';
+export function draftToJson(r, form = {}) {
+  return {
+    chain: r.chain || null, branch: r.branch || '', date: r.date || null, total: r.total ?? null, photo_key: r.photo_key || null, model: r.model || null,
+    created_at: r.created_at || Date.now(),
+    form,
+    lines: (r.lines || []).map((l) => ({
+      key: l.key, raw: l.raw || null, name: l.name || null, count: l.count ?? null, size: l.size ?? null, size_unit: l.size_unit || null,
+      qty: l.qty, unit: l.unit, price_paid: l.price_paid ?? '', price_full: l.price_full ?? '', location_id: l.location_id || null, expiry_date: l.expiry_date || '',
+      product_id: l.p?.id || null, item_id: l.it?.id || null,
+    })),
+  };
+}
+export function draftFromJson(id, d, data) {
+  return {
+    ...d,
+    draftId: id,
+    lines: (d.lines || []).map((l) => ({ ...l, p: (l.product_id && data.products[l.product_id]) || null, it: (l.item_id && data.shopping.find((s) => s.id === l.item_id)) || null })),
+  };
+}
+export const saveDraft = (id, r, form) => save([{ table: 'settings', row: { id, value: JSON.stringify(draftToJson(r, form)), deleted: 0 } }]);
+export const deleteDraft = (id, label = 'Scontrino eliminato') => save([{ table: 'settings', row: { id, deleted: 1 } }], label);
+export const newDraftId = () => `${DRAFT_PREFIX}${uuid()}`;
 
 export const normRaw = (s) =>
   String(s || '')

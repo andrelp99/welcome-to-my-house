@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
+import Consumi from './Consumi.jsx';
 import { Plus, ListChecks, BookMarked, Search, ChevronDown, Pencil, Snowflake, PackageOpen, Flame, ShieldCheck, Star, Minus, Trash2, UtensilsCrossed } from 'lucide-react';
 import { eatLeftover } from '../db/meals.js';
 import { useData, useRecipes, showToast } from '../hooks/useData.js';
@@ -16,7 +17,8 @@ export default function Inventario({ area, title, subtitle }) {
   const rec = useRecipes();
   const consumi = useLiveQuery(() => db.events.where('type').equals('consumo').toArray(), []);
   const left = useMemo(() => (data && consumi ? Object.fromEntries(depletion(consumi, data).map((x) => [x.p.id, x.days])) : {}), [data, consumi]);
-  const [tab, setTab] = useState('all');
+  const [params] = useSearchParams();
+  const [tab, setTab] = useState(() => (area === 'cibo' && params.get('vista') === 'consumi' ? 'consumi' : 'all'));
   const [q, setQ] = useState('');
   const [count, setCount] = useState(false);
   const [open, setOpen] = useState(null);
@@ -92,8 +94,14 @@ export default function Inventario({ area, title, subtitle }) {
           { value: 'all', label: 'Tutto' },
           ...locs.map((l) => ({ value: l.id, label: l.name })),
           { value: 'soon', label: '⚠ In scadenza', count: soonCount || null },
+          ...(area === 'cibo' ? [{ value: 'consumi', label: 'Consumi' }] : []),
         ]}
       />
+
+      {tab === 'consumi' ? (
+        rec ? <Consumi rec={rec} data={data} initialDate={params.get('giorno') || undefined} /> : null
+      ) : (
+      <>
 
       <div className="relative">
         <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
@@ -123,6 +131,9 @@ export default function Inventario({ area, title, subtitle }) {
         </section>
       ))}
 
+      </>
+      )}
+
       {modal?.kind === 'lot' && <LotForm data={data} area={area} lot={modal.lot} presetProduct={modal.product} onClose={() => setModal(null)} />}
       {modal?.kind === 'product' && <ProductForm data={data} product={modal.product} onClose={() => setModal(null)} />}
     </div>
@@ -131,6 +142,13 @@ export default function Inventario({ area, title, subtitle }) {
 
 function ProductRow({ r, data, rec, left, count, open, onToggle, setModal }) {
   const { p, lots, worst, total, min } = r;
+  const [draft, setDraft] = useState(null); // conta rapida: nuova quantita' da confermare
+  async function commitCount(type) {
+    const v = draft;
+    setDraft(null);
+    await setTotalQty(p, v, data, type);
+    showToast(`${p.name}: ${fmtQty(total)} → ${fmtQty(v)}${v < total ? ` (${type === 'consumo' ? 'usato' : type === 'buttato' ? 'buttato' : 'correzione'})` : ''}`, { label: 'Annulla', run: () => undo() });
+  }
   const under = min != null && total < min;
   const unit = lots[0]?.lot.unit || p.default_unit;
   return (
@@ -153,7 +171,7 @@ function ProductRow({ r, data, rec, left, count, open, onToggle, setModal }) {
           )}
         </button>
         {count ? (
-          <Stepper value={total} unit={unit} onChange={(v) => setTotalQty(p, v, data)} />
+          <Stepper value={draft ?? total} unit={unit} onChange={(v) => (Math.abs(v - total) < 1e-9 ? setDraft(null) : setDraft(v))} />
         ) : (
           <>
             {worst.level !== 'none' && <ExpiryBadge status={worst} />}
@@ -164,6 +182,21 @@ function ProductRow({ r, data, rec, left, count, open, onToggle, setModal }) {
           </>
         )}
       </div>
+      {count && draft != null && (
+        <div className="flex flex-wrap items-center justify-end gap-1.5 px-4 pb-3 text-sm">
+          {draft < total ? (
+            <>
+              <span className="text-text-secondary mr-1">{fmtQty(Math.round((total - draft) * 1000) / 1000)} {unit} mancanti sono…</span>
+              <Button variant="ghost" onClick={() => commitCount('consumo')}>usati</Button>
+              <Button variant="ghost" onClick={() => commitCount('buttato')}>buttati</Button>
+              <Button variant="ghost" onClick={() => commitCount('rettifica')}>correzione</Button>
+            </>
+          ) : (
+            <Button onClick={() => commitCount('consumo')}>Salva</Button>
+          )}
+          <Button variant="text" onClick={() => setDraft(null)}>annulla</Button>
+        </div>
+      )}
       {open && !count && (
         <div className="bg-bg-base/50 px-4 pb-3 space-y-2">
           {lots.map(({ lot, st }) => {

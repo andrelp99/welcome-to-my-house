@@ -6,11 +6,14 @@ import { FoodSelect } from '../pages/TagAI.jsx';
 import { apiFetch } from '../api/client.js';
 import { showToast } from '../hooks/useData.js';
 import { undo, save } from '../db/repo.js';
-import { setTotalQty, euro, fmtQty, todayISO, usesOf } from '../db/logic.js';
+import { euro, fmtQty, todayISO } from '../db/logic.js';
+import { CookModal } from './cook.jsx';
+import { scalesAt, portionQty, usesOps } from '../db/cook.js';
+import { uuid } from '../db/db.js';
 import { COURSES } from '../db/tags.js';
 import { recipeCost } from '../db/insights.js';
-import { ITEM_KINDS, ITEM_BY_ID, itemKindOf, MEALS_ALL, PLACES, OUT_PLACES, GOAL_DEFS, ruleLabel, mealId, addDaysIso, weekStartIso, periodContext, evaluate, daysBetween, isoDay } from '../db/variety.js';
-import { addDish, addItem, rankRecipes, mealOps, getSetting, saveSetting, goalsOf, weekEval, monthEval, doneDishes } from '../db/meals.js';
+import { ITEM_KINDS, ITEM_BY_ID, itemKindOf, MEALS_ALL, PLACES, HOME_PLACES, COST_PLACES, OUT_PLACES, GOAL_DEFS, ruleLabel, mealId, addDaysIso, weekStartIso, periodContext, evaluate, daysBetween, isoDay } from '../db/variety.js';
+import { addDish, addItem, eatLeftover as eatLeftoverOps, rankRecipes, mealOps, getSetting, saveSetting, goalsOf, weekEval, monthEval, doneDishes } from '../db/meals.js';
 
 // Colori per base (stessi nei due temi, leggibili su scuro e chiaro)
 export const BASE_COLOR = { Carboidrati: '#d9a441', Carne: '#e0605a', Pesce: '#4aa3d8', Uova: '#e2c84f', Verdure: '#5fbf7a', Frutta: '#f08bb4', Latticini: '#b9a4f0', Proteine: '#b07a4a' };
@@ -55,7 +58,7 @@ function PlaceCost({ place, cost, onPlace, onCost }) {
           </button>
         ))}
       </div>
-      {place !== 'casa' && (
+      {COST_PLACES.includes(place) && (
         <Field label="Costo del pasto (facoltativo)" hint="Finisce in Finanze come spesa extra “ristoranti”.">
           <Input inputMode="decimal" value={cost ?? ''} onChange={(e) => onCost(e.target.value)} placeholder="€" />
         </Field>
@@ -79,6 +82,8 @@ export function AddDishModal({ rec, data, date, meal: meal0, done, onClose }) {
   const [servings, setServings] = useState(1);
   const [hand, setHand] = useState({ note: '', dish_course: '', ings: [], main: null, second: null, fritto: false });
   const [busy, setBusy] = useState(false);
+  const [cook, setCook] = useState(null); // { recipe, keepOpen }
+  const scales = done && scalesAt(place);
   const ranked = useMemo(() => rankRecipes(rec, data, { today: date }), [rec, data, date]);
   const s = q.trim().toLowerCase();
   const list = ranked.filter((x) => !s || x.r.title.toLowerCase().includes(s)).slice(0, s ? 30 : 15);
@@ -86,10 +91,11 @@ export function AddDishModal({ rec, data, date, meal: meal0, done, onClose }) {
   const handSugg = hand.note.trim().length >= 3 ? ranked.filter((x) => x.r.title.toLowerCase().includes(hand.note.trim().toLowerCase())).slice(0, 4) : [];
   const setH = (k) => (v) => setHand((h) => ({ ...h, [k]: v }));
 
-  async function commit(dish, keepOpen) {
+  async function commit(dish, keepOpen, extraOps = [], id = null) {
+    if (dish.recipe_id && scales) return setCook({ recipe: rec.byId[dish.recipe_id], keepOpen });
     setBusy(true);
-    const c = place !== 'casa' ? numOrNull(cost) : null;
-    await addDish({ rec, date, meal, dish, servings, done, place, cost: place !== 'casa' || cur?.cost ? c : undefined });
+    const c = COST_PLACES.includes(place) ? numOrNull(cost) : null;
+    await addDish({ rec, date, meal, dish, servings, done, place, cost: COST_PLACES.includes(place) || cur?.cost ? c : undefined, id, extraOps });
     showToast(`${mealLabel(meal)}: aggiunto`, { label: 'Annulla', run: () => undo() });
     setBusy(false);
     if (keepOpen) {
@@ -97,19 +103,13 @@ export function AddDishModal({ rec, data, date, meal: meal0, done, onClose }) {
       setHand({ note: '', dish_course: '', ings: [], main: null, second: null, fritto: false });
     } else onClose();
   }
-  // quantita' da scalare per n porzioni, nell'unita' del prodotto
-  const itemQty = (p, n) => {
-    if (!p) return 0;
-    const u = usesOf(p);
-    const per = u ? 1 / u : ['g', 'ml'].includes(p.default_unit) ? (p.default_unit === 'g' ? 100 : 125) : ['kg', 'l'].includes(p.default_unit) ? 0.1 : 1;
-    return Math.round(per * n * 1000) / 1000;
-  };
+  const itemQty = portionQty;
   const itemStock = item.product ? data.stock[item.product.id] || 0 : 0;
   async function commitItem(keepOpen) {
     setBusy(true);
-    const c = place !== 'casa' ? numOrNull(cost) : null;
-    const used = item.product && item.scala && itemStock > 0 ? Math.min(itemStock, numOrNull(item.qty) ?? itemQty(item.product, item.n)) : 0;
-    await addItem({ rec, data, date, meal, kind: item.kind, name: item.name.trim(), product: item.product, main: item.main, usedQty: used, n: item.n, done, place, cost: place !== 'casa' || cur?.cost ? c : undefined });
+    const c = COST_PLACES.includes(place) ? numOrNull(cost) : null;
+    const used = item.product && item.scala && scalesAt(place) && itemStock > 0 ? Math.min(itemStock, numOrNull(item.qty) ?? itemQty(item.product, item.n)) : 0;
+    await addItem({ rec, data, date, meal, kind: item.kind, name: item.name.trim(), product: item.product, main: item.main, usedQty: used, n: item.n, done, place, cost: COST_PLACES.includes(place) || cur?.cost ? c : undefined });
     showToast(`${mealLabel(meal)}: ${item.name.trim()}${used ? ' (scalato dalla dispensa)' : ''}`, { label: 'Annulla', run: () => undo() });
     setBusy(false);
     if (keepOpen) setItem((it) => ({ ...it, product: null, name: '', main: undefined, n: 1, qty: '' }));
@@ -119,14 +119,18 @@ export function AddDishModal({ rec, data, date, meal: meal0, done, onClose }) {
   const itemKind = ITEM_BY_ID[item.kind];
   const itemMain = item.main !== undefined ? item.main : item.kind === 'altro' || item.kind === 'verdura' || item.kind === 'latticini' ? (item.product ? guessBase([item.product])[0] : null) ?? itemKind.main : itemKind.main;
 
-  async function eatLeftover(x, keepOpen) {
-    await setTotalQty(x.p, Math.max(0, (data.stock[x.p.id] || 0) - 1), data);
-    await commit({ leftover_of: rec.byId[x.rid] ? x.rid : null, note: rec.byId[x.rid] ? null : x.p.name }, keepOpen);
+  async function eatLeftover(x) {
+    setBusy(true);
+    const c = COST_PLACES.includes(place) ? numOrNull(cost) : null;
+    await eatLeftoverOps(x.lot, x.p, data, rec, { date, meal, place, cost: COST_PLACES.includes(place) || cur?.cost ? c : undefined });
+    showToast(`${mealLabel(meal)}: avanzo mangiato`, { label: 'Annulla', run: () => undo() });
+    setBusy(false);
+    onClose();
   }
   async function aiBase() {
     setBusy(true);
     try {
-      const res = await apiFetch('/api/ai/classify', { method: 'POST', body: JSON.stringify({ items: [{ title: hand.note.trim(), course: hand.dish_course, ingredients: hand.ings.map((p) => p.name) }] }) });
+      const res = await apiFetch('/api/ai/classify', { method: 'POST', body: JSON.stringify({ items: [{ title: hand.note.trim(), course: hand.dish_course, ingredients: hand.ings.map((x) => x.p.name) }] }) });
       const x = res.items[0] || {};
       setHand((h) => ({ ...h, main: x.main || h.main, second: x.second || h.second, dish_course: h.dish_course || x.course || '', fritto: h.fritto || (x.features || []).includes('fritto') }));
     } catch (e) {
@@ -135,14 +139,33 @@ export function AddDishModal({ rec, data, date, meal: meal0, done, onClose }) {
       setBusy(false);
     }
   }
+  // base dagli ingredienti segnati con ★ (max 2), altrimenti dai primi due
+  const starred = hand.ings.filter((x) => x.star);
+  const guess = guessBase((starred.length ? starred : hand.ings.slice(0, 2)).map((x) => x.p));
   function handDish() {
-    const guess = guessBase(hand.ings);
     const main = hand.main || guess[0] || null;
     const second = hand.second || guess.find((g) => g !== main) || null;
-    return { note: hand.note.trim(), dish_course: hand.dish_course || null, dish_main: main, dish_second: second, dish_features: hand.fritto ? 'fritto' : null, dish_ings: hand.ings.map((p) => p.id).join(',') || null };
+    return { note: hand.note.trim(), dish_course: hand.dish_course || null, dish_main: main, dish_second: second, dish_features: hand.fritto ? 'fritto' : null, dish_ings: hand.ings.map((x) => x.p.id).join(',') || null };
   }
-  const guess = guessBase(hand.ings);
+  const handQty = (x) => (x.qtyText != null && x.qtyText !== '' ? numOrNull(x.qtyText) || 0 : portionQty(x.p, servings));
+  function commitHand(keepOpen) {
+    if (!scales || !hand.ings.length) return commit(handDish(), keepOpen);
+    const id = uuid();
+    const rows = hand.ings.map((x) => ({ product: x.p, qty: handQty(x), on: true, action: 'comunque' }));
+    return commit(handDish(), keepOpen, usesOps(rows, data, { date, plan_id: id }), id);
+  }
 
+  if (cook)
+    return (
+      <CookModal
+        rec={rec} data={data} recipe={cook.recipe} date={date} meal={meal} place={place} servings={servings}
+        onClose={(ok) => {
+          if (ok && !cook.keepOpen) return onClose();
+          if (ok) setPick(null);
+          setCook(null);
+        }}
+      />
+    );
   return (
     <Modal title={`${done ? 'Cosa ho mangiato' : 'Aggiungi piatto'} · ${dateLabel(date, { weekday: 'short', day: 'numeric', month: 'short' })}`} onClose={onClose}>
       <div className="grid grid-cols-2 gap-3">
@@ -231,7 +254,7 @@ export function AddDishModal({ rec, data, date, meal: meal0, done, onClose }) {
                   <FoodSelect value={itemMain} onChange={(v) => setItem((it) => ({ ...it, main: v }))} placeholder="nessun obiettivo" aria-label="Conta come" />
                 </Field>
               </div>
-              {item.product && itemStock > 0 && (
+              {item.product && itemStock > 0 && scalesAt(place) && (
                 <div className="flex flex-wrap items-center gap-2">
                   <Toggle checked={item.scala} onChange={(v) => setItem((it) => ({ ...it, scala: v }))} label="Scala dalla dispensa" />
                   {item.scala && (
@@ -286,16 +309,23 @@ export function AddDishModal({ rec, data, date, meal: meal0, done, onClose }) {
               {COURSES.map((c) => <option key={c} value={c}>{c}</option>)}
             </Select>
           </Field>
-          <Field label={`Ingredienti principali (${hand.ings.length}/3)`}>
-            <div className="flex flex-wrap gap-1.5">
-              {hand.ings.map((p) => (
-                <span key={p.id} className="inline-flex items-center gap-1 rounded-full bg-brand/15 border border-brand/50 px-3 py-1 text-sm">
-                  {p.name}
-                  <button type="button" aria-label={`Togli ${p.name}`} onClick={() => setH('ings')(hand.ings.filter((x) => x.id !== p.id))}><X size={14} /></button>
-                </span>
+          <Field label={`Ingredienti (${hand.ings.length}/10)`} hint={`★ = principale per gli obiettivi (max 2).${scales ? ' Le quantità si scalano dalla dispensa.' : ''}`}>
+            <div className="space-y-1.5">
+              {hand.ings.map((x, i) => (
+                <div key={x.p.id} className="flex items-center gap-2">
+                  <button type="button" aria-label={`${x.p.name} principale`} aria-pressed={!!x.star} onClick={() => setH('ings')(hand.ings.map((y, j) => (j === i ? { ...y, star: !y.star && starred.length < 2 } : y)))} className={`text-lg leading-none ${x.star ? 'text-brand' : 'text-text-muted opacity-50'}`}>★</button>
+                  <span className="flex-1 min-w-0 truncate text-sm">{x.p.name}</span>
+                  {scales && (
+                    <span className="inline-flex items-center gap-1 text-sm">
+                      <input inputMode="decimal" aria-label={`Quantità ${x.p.name}`} value={x.qtyText ?? fmtQty(portionQty(x.p, servings))} onChange={(e) => setH('ings')(hand.ings.map((y, j) => (j === i ? { ...y, qtyText: e.target.value } : y)))} className="w-16 rounded-md bg-bg-elevated border border-bg-border px-2 py-1 text-right tabular-nums focus:outline-none focus:border-brand" />
+                      <span className="text-text-muted w-9">{x.p.default_unit}</span>
+                    </span>
+                  )}
+                  <button type="button" aria-label={`Togli ${x.p.name}`} onClick={() => setH('ings')(hand.ings.filter((_, j) => j !== i))}><X size={14} /></button>
+                </div>
               ))}
             </div>
-            {hand.ings.length < 3 && <ProductPicker products={data.products} area="cibo" onPick={(p) => !hand.ings.some((x) => x.id === p.id) && setH('ings')([...hand.ings, p])} placeholder="Cerca in dispensa…" />}
+            {hand.ings.length < 10 && <ProductPicker products={data.products} area="cibo" onPick={(p) => !hand.ings.some((x) => x.p.id === p.id) && setH('ings')([...hand.ings, { p, star: false }])} placeholder="Cerca in dispensa…" />}
           </Field>
           <div className="grid grid-cols-2 gap-2">
             <FoodSelect value={hand.main || guess[0] || null} onChange={setH('main')} placeholder="Base —" aria-label="Base principale" />
@@ -308,8 +338,8 @@ export function AddDishModal({ rec, data, date, meal: meal0, done, onClose }) {
             </Button>
           </div>
           <div className="flex flex-wrap justify-end gap-2">
-            <Button variant="ghost" disabled={busy || !hand.note.trim()} onClick={() => commit(handDish(), true)}><Plus size={16} /> Aggiungi e continua</Button>
-            <Button disabled={busy || !hand.note.trim()} onClick={() => commit(handDish())}>Aggiungi</Button>
+            <Button variant="ghost" disabled={busy || !hand.note.trim()} onClick={() => commitHand(true)}><Plus size={16} /> Aggiungi e continua</Button>
+            <Button disabled={busy || !hand.note.trim()} onClick={() => commitHand()}>Aggiungi</Button>
           </div>
         </div>
       )}
@@ -323,7 +353,7 @@ export function MealModal({ rec, date, meal, onClose }) {
   const [place, setPlace] = useState(cur?.place || 'casa');
   const [cost, setCost] = useState(cur?.cost ?? '');
   async function ok() {
-    await save(mealOps(date, meal, { place, cost: place !== 'casa' ? numOrNull(cost) : null }, rec), `${mealLabel(meal)} ${dateLabel(date, { day: 'numeric', month: 'short' })}: ${PLACES.find((p) => p.id === place)?.label}`);
+    await save(mealOps(date, meal, { place, cost: COST_PLACES.includes(place) ? numOrNull(cost) : null }, rec), `${mealLabel(meal)} ${dateLabel(date, { day: 'numeric', month: 'short' })}: ${PLACES.find((p) => p.id === place)?.label}`);
     onClose();
   }
   return (
@@ -534,7 +564,7 @@ export function VarietyDashboard({ rec, data, weekFrom, onGoal }) {
 
 // ── Analisi (sotto la dashboard) ──
 const W = 300;
-function LineMini({ points, max, target, color = 'rgb(var(--brand-primary))', fmt = (v) => v }) {
+export function LineMini({ points, max, target, color = 'rgb(var(--brand-primary))', fmt = (v) => v }) {
   const h = 110, px = 28, py = 10, iw = W - px - 8, ih = h - py - 20;
   const vals = points.map((p) => p.v);
   const top = max ?? Math.max(1, ...vals.filter((v) => v != null)) * 1.15;
@@ -655,13 +685,13 @@ export function Analyses({ rec, data }) {
       return [...seen.values()];
     };
     const places = { cols: w6.map(wlabel), series: [
-      { name: 'casa', color: 'rgb(var(--color-positive))', values: w6.map((w) => mealsIn(w).filter((p) => p === 'casa' || p === 'lavoro').length) },
-      { name: 'fuori', color: 'rgb(var(--color-warning))', values: w6.map((w) => mealsIn(w).filter((p) => p === 'ristorante' || p === 'amici').length) },
+      { name: 'casa', color: 'rgb(var(--color-positive))', values: w6.map((w) => mealsIn(w).filter((p) => p === 'casa' || p === 'schiscia' || p === 'lavoro').length) },
+      { name: 'fuori', color: 'rgb(var(--color-warning))', values: w6.map((w) => mealsIn(w).filter((p) => p === 'ristorante' || p === 'amici' || p === 'crema').length) },
       { name: 'delivery', color: 'rgb(var(--color-negative))', values: w6.map((w) => mealsIn(w).filter((p) => p === 'delivery').length) },
     ] };
     // costo: casa per porzione (ricette), fuori per pasto
     const homeCost = weeks.map((w) => {
-      const cs = inW(w).filter((d) => d.recipe_id && !d.leftover && placeOf(d) === 'casa').map((d) => recipeCost(rec.ings[d.recipe_id] || [], 1 / (rec.byId[d.recipe_id]?.servings || 1), data)).filter((c) => c.known);
+      const cs = inW(w).filter((d) => d.recipe_id && !d.leftover && HOME_PLACES.includes(placeOf(d))).map((d) => recipeCost(rec.ings[d.recipe_id] || [], 1 / (rec.byId[d.recipe_id]?.servings || 1), data)).filter((c) => c.known);
       return { label: wlabel(w), v: cs.length ? cs.reduce((s, c) => s + c.total, 0) / cs.length : null };
     });
     const outMeals = Object.values(rec.meals).filter((m) => OUT_PLACES.includes(m.place) && m.cost > 0 && m.date >= addDaysIso(today, -90));
@@ -677,7 +707,7 @@ export function Analyses({ rec, data }) {
       const t = (Number(r.prep_min) || 0) + (Number(r.cook_min) || 0) + (Number(r.rest_min) || 0);
       return t <= 30 ? 0 : t <= 60 ? 1 : 2;
     };
-    const cookMin = (w, b) => inW(w).filter((d) => d.recipe_id && !d.leftover && placeOf(d) === 'casa' && rec.byId[d.recipe_id] && tbucket(rec.byId[d.recipe_id]) === b).reduce((s, d) => s + (Number(rec.byId[d.recipe_id].prep_min) || 0) + (Number(rec.byId[d.recipe_id].cook_min) || 0), 0);
+    const cookMin = (w, b) => inW(w).filter((d) => d.recipe_id && !d.leftover && HOME_PLACES.includes(placeOf(d)) && rec.byId[d.recipe_id] && tbucket(rec.byId[d.recipe_id]) === b).reduce((s, d) => s + (Number(rec.byId[d.recipe_id].prep_min) || 0) + (Number(rec.byId[d.recipe_id].cook_min) || 0), 0);
     const tempo = { cols: w6.map(wlabel), series: [
       { name: 'breve', color: 'rgb(var(--color-positive))', values: w6.map((w) => cookMin(w, 0)) },
       { name: 'medio', color: 'rgb(var(--color-warning))', values: w6.map((w) => cookMin(w, 1)) },

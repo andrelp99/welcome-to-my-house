@@ -1,5 +1,6 @@
 import { lotStatus } from './logic.js';
-import { toProductUnit, convert, normUnit, NO_PRODUCT } from './recipes.js';
+import { toProductUnit, normUnit, NO_PRODUCT, priceOf } from './recipes.js';
+export { priceOf };
 
 // Prodotti con lotti scaduti o in scadenza (anticipo del luogo): da usare per primi.
 export function expiringSet(data) {
@@ -17,15 +18,6 @@ export function urgentOf(ings, exp, data) {
   const names = [];
   for (const i of ings) if (!i.optional && i.product_id && exp.has(i.product_id)) names.push(data.products[i.product_id]?.name || i.text);
   return [...new Set(names)];
-}
-
-// Prezzo di una quantita' (in unita' prodotto) dall'ultimo acquisto; null se non si sa.
-function priceOf(p, qty, data) {
-  const unitPrice = data.lastPrice[p.id];
-  if (unitPrice == null) return null;
-  const lineUnit = data.lastPriceUnit?.[p.id] || p.default_unit;
-  const q = normUnit(lineUnit) === normUnit(p.default_unit) ? qty : convert(qty, p.default_unit, lineUnit);
-  return q == null ? null : unitPrice * q;
 }
 
 // Costo stimato della ricetta alla scala data (scale = porzioni / dosi originali).

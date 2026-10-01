@@ -1,11 +1,10 @@
 import { useRef, useState } from 'react';
 import { ChefHat, Camera, ImagePlus, X, Check, AlertTriangle, XCircle, HelpCircle, Repeat, Trash2, Plus, MinusCircle, Ban, EyeOff, Eye, Star } from 'lucide-react';
-import { cookedDiaryOps, mealFromClock, getSetting } from '../db/meals.js';
 import { MEALS_ALL, FREQ_LABEL } from '../db/variety.js';
 import { todayISO } from '../db/logic.js';
 import { usePhoto, addPhoto } from '../db/photos.js';
 import { Modal, Field, Input, Select, Button, IconButton, Stepper, ProductPicker, Empty } from './ui/kit.jsx';
-import { fmtAmount, cookRecipe, proposedUses } from '../db/recipes.js';
+import { fmtAmount } from '../db/recipes.js';
 import { fmtQty } from '../db/logic.js';
 import { put, remove, undo } from '../db/repo.js';
 import { showToast } from '../hooks/useData.js';
@@ -142,83 +141,6 @@ export function Stars({ value, onChange, kind = 'star', size = 22, label }) {
   );
 }
 export const freqText = (v) => FREQ_LABEL[v == null ? 3 : v];
-
-export function CookedModal({ recipe, status, servings, data, rec, planId, urgent = 0, onClose }) {
-  const extra = !!getSetting(rec, 'planner', {})?.extraMeals;
-  const planned = planId && rec?.plan.find((e) => e.id === planId);
-  const [meal, setMeal] = useState(planned?.meal || mealFromClock(extra));
-  const [rating, setRating] = useState(recipe.rating || null);
-  const [uses, setUses] = useState(() => proposedUses(status).map((u) => ({ ...u, on: u.qty > 0 })));
-  const [left, setLeft] = useState(0);
-  const [leftLoc, setLeftLoc] = useState('loc-frigo');
-  const [busy, setBusy] = useState(false);
-  async function confirm() {
-    setBusy(true);
-    await cookRecipe({
-      recipe,
-      servings,
-      uses: uses.filter((u) => u.on && u.qty > 0),
-      leftovers: left > 0 ? { portions: left, location_id: leftLoc } : null,
-      data,
-      extraOps: rec ? cookedDiaryOps({ rec, recipe, date: todayISO(), meal, servings, planId, usedExpiring: urgent, rating: rating && rating !== recipe.rating ? rating : null }) : [],
-    });
-    showToast(`Buon appetito! Dispensa e diario aggiornati`, { label: 'Annulla', run: () => undo() });
-    onClose(true);
-  }
-  return (
-    <Modal
-      title="Ho cucinato"
-      onClose={() => onClose(false)}
-      footer={
-        <>
-          <Button variant="ghost" onClick={() => onClose(false)}>Annulla</Button>
-          <Button onClick={confirm} disabled={busy}>Conferma</Button>
-        </>
-      }
-    >
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Pasto di oggi">
-          <Select value={meal} onChange={(e) => setMeal(e.target.value)}>
-            {MEALS_ALL.filter((m) => extra || !m.extra || m.id === meal).map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
-          </Select>
-        </Field>
-        <Field label="Com'era?">
-          <Stars value={rating} onChange={setRating} label="Gradimento" />
-        </Field>
-      </div>
-      <p className="text-sm text-text-secondary">
-        {recipe.title} · {fmtQty(servings)} porzioni. Va nel diario del planner. Tolgo dalla dispensa (prima i lotti che scadono prima):
-      </p>
-      {uses.length === 0 ? (
-        <Empty>Nessun ingrediente collegato al catalogo.</Empty>
-      ) : (
-        <ul className="space-y-2">
-          {uses.map((u, i) => (
-            <li key={u.product.id} className="flex items-center gap-2">
-              <input type="checkbox" className="w-5 h-5 accent-[rgb(var(--brand-primary))]" checked={u.on} onChange={(e) => setUses((a) => a.map((x, j) => (j === i ? { ...x, on: e.target.checked } : x)))} />
-              <span className={`flex-1 min-w-0 truncate text-sm ${u.on ? '' : 'text-text-muted line-through'}`}>{u.product.name}</span>
-              <Stepper value={u.qty} unit={u.product.default_unit} onChange={(v) => setUses((a) => a.map((x, j) => (j === i ? { ...x, qty: v, on: v > 0 } : x)))} />
-            </li>
-          ))}
-        </ul>
-      )}
-      <div className="rounded-md border border-bg-border p-3 space-y-3">
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-sm font-semibold">Avanzi (porzioni)</span>
-          <Stepper value={left} unit="pz" onChange={setLeft} />
-        </div>
-        {left > 0 && (
-          <Field label="Dove" hint={leftLoc === 'loc-freezer' ? 'Congelato oggi, limite 3 mesi.' : 'Scadenza tra 3 giorni.'}>
-            <Select value={leftLoc} onChange={(e) => setLeftLoc(e.target.value)}>
-              <option value="loc-frigo">Frigo</option>
-              <option value="loc-freezer">Freezer</option>
-            </Select>
-          </Field>
-        )}
-      </div>
-    </Modal>
-  );
-}
 
 // Modale per collegare un ingrediente a un prodotto del catalogo.
 export function LinkModal({ ing, data, onPick, onCreate, onSkip, onClose }) {

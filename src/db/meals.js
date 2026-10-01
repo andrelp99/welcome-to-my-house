@@ -1,11 +1,11 @@
 import { save } from './repo.js';
 import { uuid } from './db.js';
-import { recipeStatus, NO_PRODUCT } from './recipes.js';
+import { recipeStatus, NO_PRODUCT, consumeOps } from './recipes.js';
 import { courseOf } from './tags.js';
 import { expiringSet, urgentOf } from './insights.js';
-import { todayISO, consumeOps, autoAddBelowStock } from './logic.js';
+import { todayISO, autoAddBelowStock } from './logic.js';
 import {
-  toDish, mealId, ITEM_BY_ID, goalConfig, periodContext, evaluate, scoreRecipe, weekStartIso, addDaysIso, isoDay, DEFAULT_WEIGHTS, OUT_PLACES, MEALS_ALL,
+  toDish, mealId, ITEM_BY_ID, goalConfig, periodContext, evaluate, scoreRecipe, weekStartIso, addDaysIso, isoDay, DEFAULT_WEIGHTS, OUT_PLACES, MEALS_ALL, COST_PLACES, HOME_PLACES,
 } from './variety.js';
 
 // ── Impostazioni condivise (tabella settings, JSON) ──
@@ -82,7 +82,7 @@ export function mealOps(date, meal, { place, cost } = {}, rec) {
     row.cost = cost;
     // costo fuori casa → spesa extra "ristoranti" in Finanze (una per pasto)
     const exId = cur?.expense_id || `ex-${id}`;
-    const out = (place || cur?.place) && (place || cur?.place) !== 'casa';
+    const out = COST_PLACES.includes(place || cur?.place);
     if (cost > 0 && out) {
       ops.push({ table: 'extra_expenses', row: { id: exId, amount: cost, date, area: 'cibo', category: 'ristoranti', note: `${MEALS_ALL.find((m) => m.id === meal)?.label || meal} fuori`, deleted: 0 } });
       row.expense_id = exId;
@@ -95,41 +95,33 @@ export function mealOps(date, meal, { place, cost } = {}, rec) {
   return ops;
 }
 
-export function cookedDiaryOps({ rec, recipe, date = todayISO(), meal, servings = 1, planId = null, usedExpiring = 0, rating = null }) {
-  const ops = [];
-  const existing =
-    (planId && rec.plan.find((e) => e.id === planId)) ||
-    rec.plan.find((e) => e.date === date && e.meal === meal && e.recipe_id === recipe.id && !e.done);
-  if (existing) ops.push({ table: 'meal_plan', row: { id: existing.id, done: 1, date, meal, used_expiring: usedExpiring, done_at: todayISO() } });
-  else ops.push({ table: 'meal_plan', row: { id: uuid(), date, meal, recipe_id: recipe.id, servings, done: 1, used_expiring: usedExpiring, auto: 0, done_at: todayISO() } });
-  ops.push(...mealOps(date, meal, {}, rec));
-  if (rating) ops.push({ table: 'recipes', row: { id: recipe.id, rating } });
-  return ops;
-}
-
 // Piatto aggiunto a mano dal planner/diario (ricetta, avanzo o scritto a mano).
 // dish: { recipe_id?, leftover_of?, note?, dish_course?, dish_main?, dish_second?, dish_features?, dish_ings? }
-export async function addDish({ rec, date, meal, dish, servings = 1, done, place, cost, auto = 0 }) {
-  const ops = [{ table: 'meal_plan', row: { id: uuid(), date, meal, servings, done: done ? 1 : 0, auto, ...dish, ...(done ? { done_at: todayISO() } : {}) } }];
+export async function addDish({ rec, date, meal, dish, servings = 1, done, place, cost, auto = 0, id = null, extraOps = [] }) {
+  const ops = [{ table: 'meal_plan', row: { id: id || uuid(), date, meal, servings, done: done ? 1 : 0, auto, ...dish, ...(done ? { done_at: todayISO() } : {}), ...(extraOps.length ? { scaled: 1 } : {}) } }];
+  ops.push(...extraOps);
   ops.push(...mealOps(date, meal, { place, cost }, rec));
   await save(ops, `Planner: ${dish.note || rec.byId[dish.recipe_id]?.title || rec.byId[dish.leftover_of]?.title || 'piatto'}`);
+  if (extraOps.length) await autoAddBelowStock();
 }
 
 // Alimento singolo (frutta, verdura, dolce, snack…) nel pasto. Se preso dalla dispensa la scala (usedQty nell'unita' del prodotto).
 // Una sola operazione: si annulla tutto insieme.
 export async function addItem({ rec, data, date, meal, kind, name, product = null, main, usedQty = 0, n = 1, done, place, cost }) {
   const k = ITEM_BY_ID[kind] || ITEM_BY_ID.altro;
+  const plan_id = uuid();
+  const scaled = product && usedQty > 0;
   const ops = [
     {
       table: 'meal_plan',
       row: {
-        id: uuid(), date, meal, servings: n, done: done ? 1 : 0, auto: 0, note: name,
+        id: plan_id, date, meal, scaled: scaled ? 1 : 0, servings: n, done: done ? 1 : 0, auto: 0, note: name,
         dish_course: k.course, dish_main: main === undefined ? k.main : main, dish_second: null, dish_features: 'alimento', dish_ings: product?.id || null,
         ...(done ? { done_at: todayISO() } : {}),
       },
     },
   ];
-  if (product && usedQty > 0) ops.push(...consumeOps(product, usedQty, data));
+  if (scaled) ops.push(...consumeOps(product, usedQty, data, { date, plan_id, overflow: false }));
   ops.push(...mealOps(date, meal, { place, cost }, rec));
   await save(ops, `${name}${n > 1 ? ` ×${n}` : ''} nel pasto`);
   if (product && usedQty > 0) await autoAddBelowStock();
@@ -185,16 +177,15 @@ export const isOut = (place) => OUT_PLACES.includes(place);
 export { NO_PRODUCT };
 
 // Avanzo mangiato: -1 porzione dal lotto + piatto nel diario (una sola operazione, annullabile).
-export async function eatLeftover(lot, product, data, rec, { date = todayISO(), meal } = {}) {
+export async function eatLeftover(lot, product, data, rec, { date = todayISO(), meal, place, cost } = {}) {
   const extra = !!getSetting(rec, 'planner', {})?.extraMeals;
   const m = meal || mealFromClock(extra);
   const rid = product.id.replace(/^p-avanzo-/, '');
-  const left = Math.round((Number(lot.qty) - 1) * 1000) / 1000;
+  const plan_id = uuid();
   const ops = [
-    { table: 'stock_lots', row: left > 0 ? { id: lot.id, qty: left } : { id: lot.id, qty: 0, deleted: 1 } },
-    { table: 'events', row: { type: 'consumo', product_id: product.id, qty: 1, unit: 'pz', date } },
-    { table: 'meal_plan', row: { id: uuid(), date, meal: m, servings: 1, done: 1, done_at: date, ...(rec.byId[rid] ? { leftover_of: rid } : { note: product.name }) } },
-    ...mealOps(date, m, {}, rec),
+    ...consumeOps(product, 1, data, { date, plan_id, lots: [lot] }),
+    { table: 'meal_plan', row: { id: plan_id, date, meal: m, servings: 1, done: 1, done_at: date, scaled: 1, ...(rec.byId[rid] ? { leftover_of: rid } : { note: product.name }) } },
+    ...mealOps(date, m, { place, cost }, rec),
   ];
   await save(ops, `Avanzo mangiato: ${product.name.replace(/^Avanzo: /, '')}`);
 }

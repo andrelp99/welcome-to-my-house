@@ -2,20 +2,29 @@ import { useEffect, useState } from 'react';
 import { Trash2, Snowflake, PackageOpen, Check, X } from 'lucide-react';
 import { Modal, Field, Input, Select, Toggle, Button, ProductPicker, Stepper } from './ui/kit.jsx';
 import { put, save } from '../db/repo.js';
-import { UNITS, todayISO, autoAddBelowStock, minStock, closeLot, allowedLocation, autoExpiry, durationLabel, usesOf, usesShown, usesFromShown, usesUnitLabel, lotUses, byUse, fmtQty, useBase } from '../db/logic.js';
+import { UNITS, todayISO, autoAddBelowStock, minStock, closeLot, allowedLocation, autoExpiry, durationLabel, usesOf, usesShown, usesFromShown, usesUnitLabel, lotUses, byUse, fmtQty, useBase, guessArea } from '../db/logic.js';
 import { showToast } from '../hooks/useData.js';
 import { undo } from '../db/repo.js';
 
 const num = (v) => (v === '' || v == null ? null : Number(String(v).replace(',', '.')));
 
-export function ProductForm({ data, product, initialName = '', area = 'cibo', draft = null, onClose, onSaved }) {
+const firstLoc = (data, a) => (a === 'cibo' ? 'loc-dispensa' : data.locationList.find((l) => l.area === 'casa' && l.id !== 'loc-farmacia')?.id || 'loc-altro');
+const LOC_FOR_CAT = { 'cat-igiene': 'loc-bagno', 'cat-farmacia': 'loc-farmacia', 'cat-pulizia': 'loc-soggiorno', 'cat-lavanderia': 'loc-bagno', 'cat-carta': 'loc-soggiorno' };
+const areaPatch = (data, a, cat = null) => {
+  const category_id = cat && data.categories[cat] ? cat : data.categoryList.find((c) => c.area === a)?.id;
+  const loc = (cat && LOC_FOR_CAT[cat] && data.locations[LOC_FOR_CAT[cat]] ? LOC_FOR_CAT[cat] : null) || firstLoc(data, a);
+  return { area: a, category_id, default_location_id: loc };
+};
+
+export function ProductForm({ data, product, initialName = '', area: area0 = 'cibo', draft = null, onClose, onSaved }) {
+  const guess0 = !product && !draft?.area ? guessArea(initialName) : null;
+  const area = draft?.area || guess0?.area || area0;
+  const [areaTouched, setAreaTouched] = useState(false);
   const [f, setF] = useState(() => {
     const base = product || {
       name: initialName,
-      area,
-      category_id: data.categoryList.find((c) => c.area === area)?.id,
+      ...areaPatch(data, area, guess0?.category_id),
       default_unit: 'pz',
-      default_location_id: area === 'cibo' ? 'loc-dispensa' : 'loc-altro',
       favorite: 0,
       essential: 0,
       min_stock: null,
@@ -78,21 +87,35 @@ export function ProductForm({ data, product, initialName = '', area = 'cibo', dr
       }
     >
       <Field label="Nome">
-        <Input value={f.name} onChange={(e) => set('name')(e.target.value)} autoFocus={!product} />
+        <Input
+          value={f.name}
+          onChange={(e) => {
+            const name = e.target.value;
+            const g = !product && !areaTouched ? guessArea(name) : null;
+            setF((s) => ({ ...s, name, ...(g && (s.area !== g.area || s.category_id !== g.category_id) ? areaPatch(data, g.area, g.category_id) : {}) }));
+          }}
+          autoFocus={!product}
+        />
+      </Field>
+      <Field label="Dove va" hint={f.area === 'casa' ? 'Sezione Casa: pulizia, bagno, lavanderia, carta, farmacia e tutto il non-cibo.' : 'Dispensa cibo: frigo, freezer e dispensa.'}>
+        <div className="flex gap-2">
+          {[['cibo', 'Dispensa cibo'], ['casa', 'Casa']].map(([a, l]) => (
+            <button
+              key={a}
+              type="button"
+              aria-pressed={f.area === a}
+              onClick={() => {
+                setAreaTouched(true);
+                if (f.area !== a) setF((s) => ({ ...s, ...areaPatch(data, a) }));
+              }}
+              className={`flex-1 rounded-md border px-3 py-2 text-sm font-semibold ${f.area === a ? 'bg-brand text-brand-on border-brand' : 'border-bg-border bg-bg-elevated text-text-secondary'}`}
+            >
+              {l}
+            </button>
+          ))}
+        </div>
       </Field>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Area">
-          <Select
-            value={f.area}
-            onChange={(e) => {
-              const a = e.target.value;
-              setF((s) => ({ ...s, area: a, category_id: data.categoryList.find((c) => c.area === a)?.id }));
-            }}
-          >
-            <option value="cibo">Cibo</option>
-            <option value="casa">Casa</option>
-          </Select>
-        </Field>
         <Field label="Categoria">
           <Select value={f.category_id || ''} onChange={(e) => set('category_id')(e.target.value)}>
             {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -105,7 +128,7 @@ export function ProductForm({ data, product, initialName = '', area = 'cibo', dr
         </Field>
         <Field label="Luogo abituale">
           <Select value={f.default_location_id || ''} onChange={(e) => set('default_location_id')(e.target.value)}>
-            {locs.filter((l) => l.id === f.default_location_id || allowedLocation({ ...f, pantry_days: num(f.pantry_days), fridge_days: num(f.fridge_days), freezer_max_months: num(f.freezer_max_months) }, l.id)).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+            {locs.filter((l) => l.id === f.default_location_id || (l.area === f.area && allowedLocation({ ...f, pantry_days: num(f.pantry_days), fridge_days: num(f.fridge_days), freezer_max_months: num(f.freezer_max_months) }, l.id))).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
           </Select>
         </Field>
       </div>

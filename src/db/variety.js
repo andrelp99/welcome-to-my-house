@@ -9,12 +9,16 @@ export const MEALS_ALL = [
 ];
 export const PLACES = [
   { id: 'casa', label: 'Casa' },
+  { id: 'schiscia', label: 'Schiscia' },
+  { id: 'crema', label: 'Casa Crema' },
   { id: 'ristorante', label: 'Ristorante' },
   { id: 'lavoro', label: 'Lavoro / mensa' },
   { id: 'amici', label: 'Amici / parenti' },
   { id: 'delivery', label: 'Delivery' },
 ];
 export const OUT_PLACES = ['ristorante', 'amici', 'delivery']; // "fuori" per gli obiettivi (la mensa no)
+export const HOME_PLACES = ['casa', 'schiscia']; // cucinato da me: scala la dispensa, conta come "a casa"
+export const COST_PLACES = ['ristorante', 'lavoro', 'amici', 'delivery']; // luoghi con costo del pasto
 
 // Frequenza desiderata 🔁 → giorni tra una volta e l'altra. 0 = non propormela.
 export const FREQ_DAYS = { 5: 7, 4: 14, 3: 30, 2: 75, 1: 150 };
@@ -119,9 +123,9 @@ export const GOAL_DEFS = [
   { id: 'fritto', label: 'Fritto', period: 'week', max: 1, group: 'Stile e fuori casa', ...perDish((d) => d.feats.has('fritto')) },
   { id: 'fuori', label: 'Pasti fuori', period: 'week', max: 3, unit: 'pasti', group: 'Stile e fuori casa', count: (c) => c.realMeals.filter((m) => OUT_PLACES.includes(m.place)).length },
   { id: 'delivery', label: 'Delivery', period: 'week', max: 2, unit: 'pasti', group: 'Stile e fuori casa', count: (c) => c.realMeals.filter((m) => m.place === 'delivery').length },
-  { id: 'casa', label: 'Pasti cucinati a casa', period: 'week', min: 8, unit: 'pasti', group: 'Stile e fuori casa', count: (c) => c.realMeals.filter((m) => m.place === 'casa' && (m.meal === 'pranzo' || m.meal === 'cena')).length },
+  { id: 'casa', label: 'Pasti cucinati a casa', period: 'week', min: 8, unit: 'pasti', group: 'Stile e fuori casa', count: (c) => c.realMeals.filter((m) => HOME_PLACES.includes(m.place) && (m.meal === 'pranzo' || m.meal === 'cena')).length },
   { id: 'scadenze', label: 'Ricette con cose in scadenza', period: 'week', min: 2, group: 'Anti-spreco', count: (c) => c.dishes.filter((d) => d.usedExpiring > 0).length },
-  { id: 'buttati', label: 'Prodotti buttati', period: 'week', max: 1, unit: 'prodotti', group: 'Anti-spreco', count: (c) => c.events.filter((e) => e.type === 'buttato').length },
+  { id: 'buttati', label: 'Prodotti buttati', period: 'week', max: 1, unit: 'prodotti', group: 'Anti-spreco', count: (c) => new Set(c.events.filter((e) => e.type === 'buttato').map((e) => `${e.product_id}|${e.date}`)).size },
   { id: 'diverse', label: 'Ricette diverse', period: 'month', min: 15, unit: 'ricette', group: 'Scoperta', count: (c) => new Set(c.dishes.filter((d) => d.recipe_id && !d.leftover).map((d) => d.recipe_id)).size },
   { id: 'nuove', label: 'Ricette nuove', period: 'month', min: 2, unit: 'ricette', group: 'Scoperta', count: (c) => [...c.firstDone.entries()].filter(([, date]) => date >= c.from && date <= c.to).length },
   {

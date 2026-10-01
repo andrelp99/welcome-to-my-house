@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ShoppingCart, Star, Trash2, Check, Store, Receipt, ShieldCheck, ScanLine, Loader2, Sparkles, Share2, ShoppingBasket } from 'lucide-react';
 import { useWakeLock } from '../hooks/useWakeLock.js';
 import { useData, showToast } from '../hooks/useData.js';
@@ -6,7 +6,9 @@ import { Button, IconButton, Modal, Field, Input, Select, Stepper, ProductPicker
 import { put, save, undo } from '../db/repo.js';
 import { euro, fmtQty, todayISO, autoAddBelowStock, belowStock, allowedLocation, autoExpiry } from '../db/logic.js';
 import { uuid } from '../db/db.js';
-import { readReceipt, normRaw, lineQty } from '../db/receipt.js';
+import { readReceipt, normRaw, lineQty, DRAFT_PREFIX, saveDraft, deleteDraft, newDraftId, draftFromJson } from '../db/receipt.js';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db } from '../db/db.js';
 import { ProductForm } from '../components/forms.jsx';
 import { PhotoList } from './RicettaImport.jsx';
 
@@ -19,6 +21,8 @@ export default function Spesa() {
   const [ocr, setOcr] = useState(null);
   const [shop, setShop] = useState(false);
   const awake = useWakeLock(shop);
+  const drafts = useLiveQuery(() => db.settings.where('id').startsWith(DRAFT_PREFIX).toArray(), []);
+  const [askDel, setAskDel] = useState(null);
 
   const groups = useMemo(() => {
     if (!data) return { list: [], total: 0, known: 0 };
@@ -128,6 +132,38 @@ export default function Spesa() {
         </div>
       </div>
 
+      {(drafts || []).filter((d) => !d.deleted).map((d) => {
+        let v = null;
+        try {
+          v = JSON.parse(d.value);
+        } catch {
+          return null;
+        }
+        const tot = v.lines.reduce((t, l) => t + (Number(String(l.price_paid).replace(',', '.')) || 0), 0);
+        return (
+          <div key={d.id} className="rounded-lg border border-brand/50 bg-brand/10 px-4 py-3 flex flex-wrap items-center gap-3">
+            <Receipt size={18} className="text-brand shrink-0" />
+            <div className="flex-1 min-w-0 text-sm">
+              <div className="font-semibold">Scontrino da confermare</div>
+              <div className="text-text-secondary">
+                {[v.form?.chain || v.chain, (v.form?.date || v.date) && new Date(`${v.form?.date || v.date}T12:00:00`).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' }), `${v.lines.length} righe`, euro(tot)].filter(Boolean).join(' · ')}
+              </div>
+            </div>
+            {askDel === d.id ? (
+              <>
+                <Button variant="ghost" onClick={() => setAskDel(null)}>No</Button>
+                <Button variant="ghost" className="text-negative" onClick={async () => { setAskDel(null); await deleteDraft(d.id); showToast('Scontrino eliminato', { label: 'Annulla', run: () => undo() }); }}>Sì, elimina</Button>
+              </>
+            ) : (
+              <>
+                <IconButton label="Elimina scontrino" onClick={() => setAskDel(d.id)}><Trash2 size={16} /></IconButton>
+                <Button onClick={() => setOcr(draftFromJson(d.id, v, data))}>Riprendi</Button>
+              </>
+            )}
+          </div>
+        );
+      })}
+
       <div className="rounded-lg border border-bg-border bg-bg-surface p-4 space-y-3">
         <ProductPicker products={data.products} onPick={addProduct} onCreate={addFree} placeholder="Aggiungi alla lista…" />
         <div className="flex flex-wrap gap-2">
@@ -210,10 +246,12 @@ function CheckIn({ data, items, initial, onClose }) {
     if (!list.length || b) return 'new'; // punto vendita letto ma non trovato: proponi il nuovo
     return list[0].id;
   };
-  const [chain, setChain] = useState(startChain);
-  const [storeId, setStoreId] = useState(() => findBranch(startChain, initial?.branch));
-  const [newBranch, setNewBranch] = useState(initial?.branch || '');
-  const [date, setDate] = useState(initial?.date || todayISO());
+  const form0 = initial?.form || {};
+  const [chain, setChain] = useState(form0.chain || startChain);
+  const [storeId, setStoreId] = useState(() => (form0.storeId && (form0.storeId === 'new' || data.stores.some((s) => s.id === form0.storeId)) ? form0.storeId : findBranch(form0.chain || startChain, initial?.branch)));
+  const [newBranch, setNewBranch] = useState(form0.newBranch ?? initial?.branch ?? '');
+  const [date, setDate] = useState(form0.date || initial?.date || todayISO());
+  const [askDel, setAskDel] = useState(false);
   const [linking, setLinking] = useState(null);
   const [creating, setCreating] = useState(null);
   const [lines, setLines] = useState(() =>
@@ -237,6 +275,30 @@ function CheckIn({ data, items, initial, onClose }) {
         })
   );
   const upd = (i, k, v) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, [k]: v } : l)));
+  // bozza scontrino: salva ogni modifica (resta anche chiudendo con la X)
+  const draftId = initial?.draftId || null;
+  const first = useRef(true);
+  const done = useRef(false);
+  useEffect(() => {
+    if (!draftId) return;
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    const t = setTimeout(() => !done.current && saveDraft(draftId, { ...initial, lines }, { chain, storeId, newBranch, date }), 500);
+    return () => clearTimeout(t);
+  }, [draftId, lines, chain, storeId, newBranch, date]); // eslint-disable-line react-hooks/exhaustive-deps
+  // chiusura subito dopo una modifica: salva l'ultimo stato
+  const latest = useRef(null);
+  latest.current = { lines, chain, storeId, newBranch, date };
+  useEffect(
+    () => () => {
+      if (!draftId || done.current || first.current) return;
+      const x = latest.current;
+      saveDraft(draftId, { ...initial, lines: x.lines }, { chain: x.chain, storeId: x.storeId, newBranch: x.newBranch, date: x.date });
+    },
+    [] // eslint-disable-line react-hooks/exhaustive-deps
+  );
   const n = (v) => (v === '' || v == null ? null : Number(String(v).replace(',', '.')));
   const total = lines.reduce((s, l) => s + (n(l.price_paid) || 0), 0);
   const discount = lines.reduce((s, l) => s + (n(l.price_full) != null && n(l.price_paid) != null ? n(l.price_full) - n(l.price_paid) : 0), 0);
@@ -281,6 +343,10 @@ function CheckIn({ data, items, initial, onClose }) {
       // memoria: la prossima volta questa riga di scontrino viene riconosciuta da sola
       if (ocr && l.p && l.raw) ops.push({ table: 'receipt_aliases', row: { id: `ra-${normRaw(l.raw).replace(/ /g, '-').slice(0, 60)}`, text: l.raw, product_id: l.p.id, store_chain: chain, deleted: 0 } });
     }
+    if (draftId) {
+      done.current = true;
+      ops.push({ table: 'settings', row: { id: draftId, deleted: 1 } });
+    }
     await save(ops, `Spesa ${chain} ${euro(total)}`);
     await autoAddBelowStock();
     showToast(`Spesa registrata: ${euro(total)}`, { label: 'Annulla', run: () => undo() });
@@ -297,13 +363,28 @@ function CheckIn({ data, items, initial, onClose }) {
             <div className="font-bold">{euro(total)}</div>
             {discount > 0 && <div className="text-positive text-xs">risparmio {euro(discount)}</div>}
           </div>
-          <Button variant="ghost" onClick={onClose}>Annulla</Button>
+          {draftId ? (
+            askDel ? (
+              <>
+                <Button variant="ghost" onClick={() => setAskDel(false)}>No</Button>
+                <Button variant="ghost" className="text-negative" onClick={async () => { done.current = true; await deleteDraft(draftId); showToast('Scontrino eliminato', { label: 'Annulla', run: () => undo() }); onClose(); }}>Sì, elimina</Button>
+              </>
+            ) : (
+              <>
+                <IconButton label="Elimina scontrino" onClick={() => setAskDel(true)}><Trash2 size={16} /></IconButton>
+                <Button variant="ghost" onClick={onClose}>Dopo</Button>
+              </>
+            )
+          ) : (
+            <Button variant="ghost" onClick={onClose}>Annulla</Button>
+          )}
           <Button onClick={confirm} disabled={!chain || !lines.length}>Registra</Button>
         </>
       }
     >
       {ocr && (
         <div className="rounded-md border border-brand/40 bg-brand-dim/40 px-3 py-2 text-sm space-y-1">
+          {draftId && <div className="text-text-secondary">Salvato: se chiudi lo ritrovi in Spesa finché non lo registri o lo elimini.</div>}
           <div>{lines.length} righe lette{unlinked ? ` · ${unlinked} da collegare al catalogo (senza collegamento non entrano in dispensa)` : ''}.</div>
           {Math.abs(totalGap) >= 0.05 && <div className="text-warning">Totale scontrino {euro(initial.total)}: differenza {euro(totalGap)}. Controlla righe e sconti.</div>}
         </div>
@@ -397,7 +478,10 @@ function ReceiptScan({ data, onRead, onClose }) {
     try {
       const r = await readReceipt(files, data);
       if (!r.lines.length) throw new Error('Nessuna riga letta. Riprova con più luce e scontrino dritto.');
-      onRead(r);
+      // salva subito la lettura: anche chiudendo (o chiudendo l'app mentre legge) non si perde
+      const draftId = newDraftId();
+      await saveDraft(draftId, r, {});
+      onRead({ ...r, draftId });
     } catch (e) {
       setErr(e.message);
     } finally {
