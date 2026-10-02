@@ -14,7 +14,7 @@ import { uuid } from '../db/db.js';
 const num = (v) => (v === '' || v == null ? null : Number(String(v).replace(',', '.')));
 const txtArea = 'w-full rounded-md bg-bg-elevated border border-bg-border px-3 py-2.5 text-text-primary placeholder:text-text-muted focus:outline-none focus:border-brand';
 
-const EMPTY = { title: '', servings: 1, prep_min: '', cook_min: '', rest_min: '', difficulty: '', course: '', main_food: '', second_food: '', features: '', tags: '', diet_tags: '', photo_key: null, source_url: '', notes: '', rating: null };
+const EMPTY = { title: '', servings: 1, prep_min: '', cook_min: '', rest_min: '', difficulty: '', course: '', main_food: '', second_food: '', third_food: '', features: '', tags: '', diet_tags: '', photo_key: null, source_url: '', notes: '', rating: null };
 
 export default function RicettaForm() {
   const { id } = useParams();
@@ -111,6 +111,7 @@ export default function RicettaForm() {
       course: f.course || null,
       main_food: f.main_food || null,
       second_food: f.second_food && f.second_food !== f.main_food ? f.second_food : null,
+      third_food: f.third_food && f.second_food && f.third_food !== f.main_food && f.third_food !== f.second_food ? f.third_food : null,
       features: joinList(parseList(f.features)) || null,
       tags: joinList(parseList(f.tags)) || null,
       diet_tags: joinList(diet) || null,
@@ -207,6 +208,11 @@ export default function RicettaForm() {
           <Field label="Secondario (facoltativo)">
             <FoodSelect value={f.second_food} onChange={(v) => set('second_food')(v || '')} />
           </Field>
+          {f.second_food ? (
+            <Field label="Terzo (facoltativo)">
+              <FoodSelect value={f.third_food} onChange={(v) => set('third_food')(v || '')} />
+            </Field>
+          ) : null}
         </div>
         <Field label="Caratteristiche" hint="Leggero, economico e richiede riposo si calcolano da soli (su 1 porzione).">
           <FeaturePicker value={parseList(f.features)} onChange={(v) => set('features')(joinList(v))} />

@@ -5,8 +5,8 @@ import { ChevronLeft, ChevronRight, Plus, ShoppingCart, Trash2, Check, PenLine, 
 import { useData, useRecipes, showToast } from '../hooks/useData.js';
 import { Button, IconButton, Modal, Field, Toggle, Select, Empty } from '../components/ui/kit.jsx';
 import { AddDishModal, MealModal, VarietyDashboard, Analyses } from '../components/diary.jsx';
-import { CookModal, RestoreModal } from '../components/cook.jsx';
-import { needsCook } from '../db/cook.js';
+import { CookModal, RestoreModal, AddUsedModal } from '../components/cook.jsx';
+import { needsCook, scalesAt } from '../db/cook.js';
 import { dayCost } from '../db/consumi.js';
 import { MEALS_ALL, PLACES, mealId, itemKindOfCourse } from '../db/variety.js';
 import { getSetting, saveSetting, proposeFor, saveProposals, removeProposals } from '../db/meals.js';
@@ -31,6 +31,7 @@ export default function Planner() {
   const [showAn, setShowAn] = useState(false);
   const [cooking, setCooking] = useState(null); // piatto da segnare mangiato con ingredienti
   const [restoring, setRestoring] = useState(null); // { entry, remove }
+  const [addingUsed, setAddingUsed] = useState(null); // piatto gia' mangiato a cui aggiungere ingredienti
   const todayRef = useRef(null);
   const scrolled = useRef(false);
   useEffect(() => {
@@ -172,6 +173,9 @@ export default function Planner() {
                               {isItem ? <span className="rounded-full border border-bg-border px-1.5">{itemKindOfCourse(e.dish_course).label}</span> : null}
                               {!e.recipe_id && !e.leftover_of && e.dish_main ? <span>{isItem ? 'conta: ' : ''}{foodLabel(e.dish_main)}</span> : null}
                               {!e.done && status[e.id] && <StatusChip st={status[e.id]} />}
+                              {e.done && !isItem && scalesAt(rec.meals[mealId(e.date, e.meal)]?.place) ? (
+                                <button type="button" className="text-brand font-semibold" onClick={() => setAddingUsed(e)}>+ ingredienti</button>
+                              ) : null}
                             </div>
                           </div>
                           <IconButton
@@ -207,6 +211,7 @@ export default function Planner() {
       </div>
 
       {cooking && <CookModal rec={rec} data={data} recipe={(cooking.recipe_id && rec.byId[cooking.recipe_id]) || null} entry={cooking} servings={cooking.servings} onClose={() => setCooking(null)} />}
+      {addingUsed && <AddUsedModal rec={rec} data={data} entry={addingUsed} onClose={() => setAddingUsed(null)} />}
       {restoring && <RestoreModal rec={rec} data={data} entry={restoring.entry} remove={restoring.remove} onClose={() => setRestoring(null)} />}
       {adding && <AddDishModal rec={rec} data={data} date={adding.date} meal={adding.meal} done={adding.done} onClose={() => setAdding(null)} />}
       {mealEdit && <MealModal rec={rec} date={mealEdit.date} meal={mealEdit.meal} onClose={() => setMealEdit(null)} />}

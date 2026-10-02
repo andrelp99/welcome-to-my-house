@@ -201,3 +201,24 @@ export async function restoreOps(rec, data, entry) {
   ops.push({ table: 'meal_plan', row: { id: entry.id, scaled: 0 } });
   return ops;
 }
+
+// Ingredienti aggiunti dopo a un piatto gia' cucinato (es. parmigiano dimenticato): scala la dispensa
+// con la data del piatto, li lega al piatto e aggiorna costo reale e costo per porzione dell'avanzo.
+export async function addUsedSave({ rec, data, entry, rows }) {
+  const recipe_id = entry.recipe_id || null;
+  const u = usesOps(rows.map((r) => ({ ...r, on: true })), data, { date: entry.date, plan_id: entry.id, recipe_id });
+  if (!u.length) return 0;
+  const added = opsValue(u);
+  const ops = [...u, { table: 'meal_plan', row: { id: entry.id, scaled: 1 } }];
+  const cook = rec.events.find((e) => e.type === 'cucinato' && e.plan_id === entry.id);
+  if (cook && added > 0) {
+    const total = Math.round(((Number(cook.value) || 0) + added) * 100) / 100;
+    ops.push({ table: 'events', row: { id: cook.id, value: total } });
+    const cooked = Number(cook.qty) || Number(entry.cooked) || 1;
+    for (const l of data.lots.filter((x) => x.plan_id === entry.id)) ops.push({ table: 'stock_lots', row: { id: l.id, unit_cost: Math.round((total / cooked) * 100) / 100 } });
+  }
+  const title = (recipe_id && rec.byId[recipe_id]?.title) || entry.note || 'piatto';
+  await save(ops, `${title}: + ${rows.map((r) => r.product.name).join(', ')}`);
+  await autoAddBelowStock();
+  return added;
+}

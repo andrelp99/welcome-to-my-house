@@ -140,5 +140,6 @@ export function autoTags(r, ings, steps) {
     difficulty: difficultyOf(r, ings, steps),
     main: parseFood(r.main_food),
     second: parseFood(r.second_food),
+    third: parseFood(r.third_food),
   };
 }

@@ -136,6 +136,7 @@ export default function RicettaDettaglio() {
             {auto.course && <AutoTag label="portata" auto={auto.course.auto}>{auto.course.value}</AutoTag>}
             {auto.main && <AutoTag label="alimento principale">{foodLabel(auto.main.value)}</AutoTag>}
             {auto.second && <AutoTag label="alimento secondario">+ {foodLabel(auto.second.value)}</AutoTag>}
+            {auto.third && <AutoTag label="terzo alimento">+ {foodLabel(auto.third.value)}</AutoTag>}
             {auto.time && <AutoTag label="tempo totale (con riposo)" icon={Clock}>{auto.time}</AutoTag>}
             {auto.difficulty && <AutoTag label="difficoltà" icon={Gauge} auto={auto.difficulty.auto}>{auto.difficulty.label}</AutoTag>}
             {[...feats].map((f) => (

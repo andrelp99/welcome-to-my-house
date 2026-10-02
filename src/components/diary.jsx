@@ -670,7 +670,7 @@ export function Analyses({ rec, data }) {
     const m0 = `${today.slice(0, 7)}-01`;
     const md = dishes.filter((d) => d.date >= m0 && d.date <= today);
     const cnt = {};
-    for (const d of md) for (const v of [d.main, d.second]) if (baseKey(v)) cnt[baseKey(v)] = (cnt[baseKey(v)] || 0) + 1;
+    for (const d of md) for (const v of [d.main, d.second, d.third]) if (baseKey(v)) cnt[baseKey(v)] = (cnt[baseKey(v)] || 0) + 1;
     const basi = Object.entries(cnt).sort((x, y) => y[1] - x[1]).map(([k, v]) => ({ k, v, c: BASE_COLOR[k] }));
     // calendario del mese: pranzo e cena
     const monthDays = [];
@@ -715,7 +715,7 @@ export function Analyses({ rec, data }) {
     ] };
     // serie
     const dayHas = (day, f) => dishes.some((d) => d.date === day && f(d));
-    const isVegD = (d) => ['Verdure|ortaggi', 'Verdure|funghi', 'Verdure'].some((k) => d.main === k || d.second === k) || d.course === 'Contorno';
+    const isVegD = (d) => ['Verdure|ortaggi', 'Verdure|funghi', 'Verdure'].some((k) => d.main === k || d.second === k || d.third === k) || d.course === 'Contorno';
     const streak = (f) => {
       let n = 0;
       let x = dayHas(today, f) ? today : addDaysIso(today, -1);

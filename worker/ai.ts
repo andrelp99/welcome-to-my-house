@@ -80,12 +80,13 @@ Per ciascuna rispondi usando SOLO questi valori:
   Carboidrati|pasta, Carboidrati|riso, Carboidrati|cereali, Carboidrati|pane e impasti, Carboidrati|patate,
   Verdure|ortaggi, Verdure|funghi, Verdure|frutta
 - second: alimento secondario importante con gli stessi valori, oppure null (solo se davvero caratterizza il piatto, es. pasta e fagioli: main Carboidrati|pasta, second Proteine|legumi)
+- third: terzo alimento con gli stessi valori, oppure null (raro: solo piatti con tre componenti importanti, es. pasta salsiccia e funghi)
 - features: da 2 a 6 tra: congela (si congela bene), frigo (dura 2-3 giorni in frigo), subito (da mangiare subito), mealprep,
   freddo, tiepido, caldo, crudo (senza cottura), forno, padella, griglia, fritto, bollito (anche vapore), umido (cottura lenta/in umido),
   schiscetta (da portare via), unapentola, anticipo (si prepara in anticipo), proteico, sostanzioso, piccante,
   quotidiano (tutti i giorni), ospiti, festa, estate, inverno
 - diet: tra "senza glutine", "senza lattosio" solo se certo dagli ingredienti, altrimenti []
-Rispondi SOLO con JSON valido: { "items": [{"n": number, "course": string, "difficulty": string, "main": string, "second": string|null, "features": string[], "diet": string[]}] }
+Rispondi SOLO con JSON valido: { "items": [{"n": number, "course": string, "difficulty": string, "main": string, "second": string|null, "third": string|null, "features": string[], "diet": string[]}] }
 Un elemento per ogni ricetta con lo stesso "n". Non inventare valori fuori elenco.`,
 } as const;
 

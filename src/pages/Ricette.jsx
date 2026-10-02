@@ -57,7 +57,7 @@ export default function Ricette() {
 
   if (!data || !rec) return null;
   const s = q.trim().toLowerCase();
-  const baseMatch = (auto) => [auto.main, auto.second].some((f) => f && (fBase.includes('|') ? f.value === fBase : f.group === fBase));
+  const baseMatch = (auto) => [auto.main, auto.second, auto.third].some((f) => f && (fBase.includes('|') ? f.value === fBase : f.group === fBase));
   const list = rows.filter(({ r, st, diet: d, tags, season: inSeason, auto, feats }) => {
     if (season && !inSeason) return false;
     if (goal?.match && !goal.match(recipeAsDish(r))) return false;

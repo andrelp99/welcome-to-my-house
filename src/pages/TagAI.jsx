@@ -79,6 +79,7 @@ export default function TagAI() {
         difficulty: r.difficulty || null,
         main_food: r.main_food || null,
         second_food: r.second_food || null,
+        third_food: r.third_food || null,
         features: parseList(r.features),
         diet_tags: parseList(r.diet_tags),
       };
@@ -88,6 +89,7 @@ export default function TagAI() {
             difficulty: cur.difficulty || p.difficulty,
             main_food: cur.main_food || p.main,
             second_food: cur.main_food ? cur.second_food : p.second,
+            third_food: cur.main_food ? cur.third_food : p.third || null,
             features: cur.features.length ? cur.features : p.features || [],
             diet_tags: [...new Set([...cur.diet_tags, ...(p.diet || [])])],
           }
@@ -153,6 +155,8 @@ export default function TagAI() {
       if ((v.difficulty || null) !== (x.r.difficulty || null)) row.difficulty = v.difficulty || null;
       if ((v.main_food || null) !== (x.r.main_food || null)) row.main_food = v.main_food || null;
       if ((v.second_food || null) !== (x.r.second_food || null)) row.second_food = v.second_food && v.second_food !== v.main_food ? v.second_food : null;
+      const third = v.third_food && v.second_food && v.third_food !== v.main_food && v.third_food !== v.second_food ? v.third_food : null;
+      if (third !== (x.r.third_food || null)) row.third_food = third;
       const feats = joinList(v.features) || null;
       if (feats !== (x.r.features || null)) row.features = feats;
       const diet = joinList(v.diet_tags) || null;
@@ -207,7 +211,7 @@ export default function TagAI() {
         <ul className="rounded-lg border border-bg-border bg-bg-surface divide-y divide-bg-border">
           {shown.map((x) => {
             const v = x.val;
-            const summary = [v.course, foodLabel(v.main_food), v.second_food ? `+ ${foodLabel(v.second_food)}` : null, v.difficulty ? DIFF_LABEL[v.difficulty] : null].filter(Boolean).join(' · ');
+            const summary = [v.course, foodLabel(v.main_food), v.second_food ? `+ ${foodLabel(v.second_food)}` : null, v.third_food ? `+ ${foodLabel(v.third_food)}` : null, v.difficulty ? DIFF_LABEL[v.difficulty] : null].filter(Boolean).join(' · ');
             return (
               <li key={x.r.id} className="px-3 py-3 space-y-2" data-testid="cls-row">
                 <div className="flex items-center gap-2">
@@ -241,6 +245,7 @@ export default function TagAI() {
                       </Select>
                       <FoodSelect value={v.main_food} onChange={(val) => setField(x.r.id, 'main_food', val)} placeholder="Principale —" aria-label="Alimento principale" />
                       <FoodSelect value={v.second_food} onChange={(val) => setField(x.r.id, 'second_food', val)} placeholder="Secondario —" aria-label="Alimento secondario" />
+                      {v.second_food ? <FoodSelect value={v.third_food} onChange={(val) => setField(x.r.id, 'third_food', val)} placeholder="Terzo —" aria-label="Terzo alimento" /> : null}
                     </div>
                     <FeaturePicker value={v.features} onChange={(val) => setField(x.r.id, 'features', val)} />
                   </div>

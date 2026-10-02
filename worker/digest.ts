@@ -146,7 +146,7 @@ async function weekRecap(db: D1Database, today: string) {
   const to = addDaysIso(from, 6);
   const [plan, recipes, meals, events, goalsRow] = await Promise.all([
     all(db, 'SELECT * FROM meal_plan WHERE deleted = 0 AND done = 1 AND date >= ? AND date <= ?', from, to),
-    all(db, 'SELECT id, title, course, main_food, second_food, features, rating, want_freq FROM recipes WHERE deleted = 0'),
+    all(db, 'SELECT id, title, course, main_food, second_food, third_food, features, rating, want_freq FROM recipes WHERE deleted = 0'),
     all(db, 'SELECT * FROM meals WHERE deleted = 0 AND date >= ? AND date <= ?', from, to),
     all(db, "SELECT type, date, product_id, value, lot_id, plan_id FROM events WHERE deleted = 0 AND date >= ? AND date <= ?", from, to),
     db.prepare("SELECT value FROM settings WHERE id = 'goals' AND deleted = 0").first<{ value: string }>(),

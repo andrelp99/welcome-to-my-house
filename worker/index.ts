@@ -255,6 +255,7 @@ app.post('/ai/classify', async (c) => {
       const r = raw.find((y: any) => Number(y?.n) === i + 1) || raw[i] || {};
       const main = pickOne(r.main, CLS.food);
       const second = pickOne(r.second, CLS.food);
+      const third = pickOne(r.third, CLS.food);
       const list = (v: unknown, allowed: string[]) => [...new Set((Array.isArray(v) ? v : []).map((f) => pickOne(f, allowed)).filter((f): f is string => !!f))];
       return {
         title: x.title,
@@ -262,6 +263,7 @@ app.post('/ai/classify', async (c) => {
         difficulty: pickOne(r.difficulty, CLS.difficulty),
         main,
         second: second && second !== main ? second : null,
+        third: third && second && third !== main && third !== second ? third : null,
         features: list(r.features, CLS.features).slice(0, 8),
         diet: list(r.diet, CLS.diet),
       };

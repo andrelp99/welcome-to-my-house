@@ -58,6 +58,7 @@ export function toDish(entry, recipe, meal, courseOf) {
     course,
     main: r ? r.main_food || null : entry.dish_main || null,
     second: r ? r.second_food || null : entry.dish_second || null,
+    third: r ? r.third_food || null : null,
     feats: new Set(list(r ? r.features : entry.dish_features)),
     usedExpiring: Number(entry.used_expiring) || 0,
     rating: r ? Number(r.rating) || null : null,
@@ -67,7 +68,7 @@ export function toDish(entry, recipe, meal, courseOf) {
 }
 const grp = (v) => (v ? String(v).split('|')[0] : null);
 // ha la base: "Pesce" (gruppo) o "Carne|rossa" (sottocategoria)
-export const has = (dish, key) => [dish.main, dish.second].some((v) => v && (key.includes('|') ? v === key : grp(v) === key));
+export const has = (dish, key) => [dish.main, dish.second, dish.third].some((v) => v && (key.includes('|') ? v === key : grp(v) === key));
 const isVeg = (d) => has(d, 'Verdure|ortaggi') || has(d, 'Verdure|funghi') || (has(d, 'Verdure') && !has(d, 'Verdure|frutta')) || d.course === 'Contorno';
 const isMeat = (d) => has(d, 'Carne');
 
@@ -230,11 +231,11 @@ export function scoreRecipe(r, info, ctx) {
   }
   const yesterday = addDaysIso(ctx.today, -1);
   const mg = grp(d.main);
-  if (mg && ctx.recentDishes.some((x) => x.date >= yesterday && x.date < ctx.today && [x.main, x.second].some((v2) => grp(v2) === mg))) {
+  if (mg && ctx.recentDishes.some((x) => x.date >= yesterday && x.date < ctx.today && [x.main, x.second, x.third].some((v2) => grp(v2) === mg))) {
     v -= 0.25;
     reasons.push(`${mg.toLowerCase()} ieri`);
   }
-  if (d.main && d.main.includes('|') && ctx.recentDishes.some((x) => x.date >= addDaysIso(ctx.today, -2) && [x.main, x.second].includes(d.main))) {
+  if (d.main && d.main.includes('|') && ctx.recentDishes.some((x) => x.date >= addDaysIso(ctx.today, -2) && [x.main, x.second, x.third].includes(d.main))) {
     v -= 0.45;
     reasons.push(`${d.main.split('|')[1]} negli ultimi 2 giorni`);
   }

@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Download, Search, X } from 'lucide-react';
 import { Button, IconButton, Tabs, Empty } from '../components/ui/kit.jsx';
 import { HBars } from '../components/charts.jsx';
+import { AddUsedModal } from '../components/cook.jsx';
 import { LineMini } from '../components/diary.jsx';
 import { valueOf, dayRecap, periodStats, dormant, balance, productCard, periodCsv, isLeftoverProduct } from '../db/consumi.js';
 import { addDaysIso, weekStartIso, PLACES } from '../db/variety.js';
@@ -43,6 +44,7 @@ function Card({ title, children, right }) {
 // ── Giorno ──
 function DayView({ rec, data, date, setDate }) {
   const r = useMemo(() => dayRecap(rec, data, date), [rec, data, date]);
+  const [adding, setAdding] = useState(null);
   const today = todayISO();
   return (
     <div className="space-y-3">
@@ -75,6 +77,9 @@ function DayView({ rec, data, date, setDate }) {
                 {d.item ? ' · alimento' : ''}
                 {d.share < 1 ? ` · ${fmtQty(d.entry.servings)} di ${fmtQty(d.entry.cooked)} porz.` : ''}
                 {!d.lines.length && !d.item ? ' · niente scalato' : ''}
+                {!d.item && (m.place === 'casa' || m.place === 'schiscia') ? (
+                  <button type="button" className="ml-2 text-brand font-semibold" onClick={() => setAdding(d.entry)}>+ ingredienti</button>
+                ) : null}
               </div>
               {d.lines.map((l) => (
                 <div key={l.p.id} className="grid grid-cols-[1fr_auto_auto] gap-3 text-sm tabular-nums">
@@ -87,6 +92,7 @@ function DayView({ rec, data, date, setDate }) {
           ))}
         </section>
       ))}
+      {adding && <AddUsedModal rec={rec} data={data} entry={adding} onClose={() => setAdding(null)} />}
       {r.outside.length > 0 && (
         <section className="space-y-1 px-1">
           <div className="text-[11px] uppercase tracking-wider font-semibold text-text-muted">Fuori dai pasti</div>

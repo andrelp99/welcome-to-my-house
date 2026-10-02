@@ -22,7 +22,7 @@ export const TABLES: Record<string, string[]> = {
   recipes: [
     'id', 'title', 'servings', 'prep_min', 'cook_min', 'rest_min', 'difficulty', 'tags', 'diet_tags', 'nutrition',
     'photo_key', 'source_url', 'notes', 'favorite', 'cooked_count', 'last_cooked_at', 'course',
-    'main_food', 'second_food', 'features', 'rating', 'want_freq',
+    'main_food', 'second_food', 'third_food', 'features', 'rating', 'want_freq',
   ],
   recipe_ingredients: ['id', 'recipe_id', 'product_id', 'text', 'qty', 'unit', 'optional', 'grp', 'sort'],
   recipe_steps: ['id', 'recipe_id', 'sort', 'text', 'timer_min', 'photo_key'],

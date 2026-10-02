@@ -217,6 +217,13 @@ Sostituisce i tag AI liberi della 0.10 (quei tag ora sono nascosti per non dupli
 - **Catalogo**: pulsante fisso "Durate e porzioni".
 - Migrazione `0009_classificazione.sql`: PRIMA del push.
 
+## Terzo alimento delle ricette (0.15.0)
+
+- `recipes.third_food` (migrazione `0013`), facoltativo come il secondario: compare nel modulo ricetta e in Classifica con AI solo se c'è il secondario; l'AI lo propone raramente (piatti con tre componenti importanti).
+- Conta negli obiettivi, nei filtri per base del ricettario, nella varietà delle Consigliate e nelle analisi, come principale e secondario.
+- **+ ingredienti** su un piatto già mangiato (Casa/Schiscia), dal planner o da Consumi → Giorno: scegli prodotti e quantità, scala la dispensa con la data del piatto (prima i lotti che scadono), li lega al piatto (`events.plan_id`), aggiorna il costo reale della cottura e il costo per porzione dell'avanzo. Togliendo "mangiato" tornano in dispensa anche questi.
+- Storico retroattivo: i piatti del diario leggono sempre la ricetta attuale (titolo, portata, alimenti, caratteristiche, stelle), quindi modificare una ricetta aggiorna subito obiettivi, dashboard e analisi di tutte le settimane passate. Restano invece come registrati ingredienti consumati e costi (sono ciò che è stato davvero usato).
+
 ## Ingredienti per pasto e consumi (0.14.0)
 
 - **Ho cucinato ovunque**: ✓ nel planner, "Cosa ho mangiato → Ricettario", proposte segnate fatte e pagina ricetta aprono lo stesso pannello (`src/components/cook.jsx`, `src/db/cook.js`). Scala solo con luogo **Casa** o **Schiscia**; **Casa Crema**, fuori e mensa vanno solo nel diario.

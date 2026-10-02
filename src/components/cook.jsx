@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { Modal, Field, Select, Button, Stepper, ProductPicker } from './ui/kit.jsx';
 import { Stars } from './recipes.jsx';
-import { buildUses, cookSave, scalesAt, rowState, qtyForOption, portionQty, restoreOps } from '../db/cook.js';
+import { buildUses, cookSave, scalesAt, rowState, qtyForOption, portionQty, restoreOps, addUsedSave } from '../db/cook.js';
 import { getSetting, mealFromClock } from '../db/meals.js';
 import { MEALS_ALL, PLACES } from '../db/variety.js';
 import { euro, fmtQty, todayISO } from '../db/logic.js';
@@ -205,6 +205,71 @@ export function RestoreModal({ rec, data, entry, remove = false, onClose }) {
       <p className="font-semibold">{title}: rimetto in dispensa gli ingredienti?</p>
       {names.length > 0 && <p className="text-sm text-text-secondary">{names.join(' · ')}</p>}
       {data.lots.some((l) => l.plan_id === entry.id) && <p className="text-xs text-text-muted">Tolgo anche l'avanzo creato.</p>}
+    </Modal>
+  );
+}
+
+// "+ ingrediente" su un piatto gia' mangiato: cosa hai usato in piu', con la quantita'.
+export function AddUsedModal({ rec, data, entry, onClose }) {
+  const [rows, setRows] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const title = (entry.recipe_id && rec.byId[entry.recipe_id]?.title) || entry.note || 'Piatto';
+  const already = useMemo(() => {
+    const m = {};
+    for (const e of rec.events.filter((x) => x.plan_id === entry.id && x.type === 'consumo')) {
+      const p = data.products[e.product_id];
+      if (!p) continue;
+      m[p.id] = { p, qty: Math.round(((m[p.id]?.qty || 0) + Number(e.qty)) * 1000) / 1000 };
+    }
+    return Object.values(m);
+  }, [rec, data, entry.id]);
+  const upd = (key, patch) => setRows((a) => a.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  const valid = rows.filter((r) => r.qty > 0);
+  const est = valid.reduce((s, r) => s + (priceOf(r.product, r.qty, data) || 0), 0);
+  async function confirm() {
+    setBusy(true);
+    const v = await addUsedSave({ rec, data, entry, rows: valid });
+    showToast(`${title}: ${valid.length} ingredient${valid.length === 1 ? 'e' : 'i'} aggiunt${valid.length === 1 ? 'o' : 'i'}${v ? ` · ${euro(v)}` : ''}`, { label: 'Annulla', run: () => undo() });
+    onClose(true);
+  }
+  return (
+    <Modal
+      title="Ingredienti in più"
+      onClose={() => onClose(false)}
+      footer={
+        <>
+          <Button variant="ghost" onClick={() => onClose(false)}>Annulla</Button>
+          <Button onClick={confirm} disabled={busy || !valid.length}>Aggiungi{est > 0 ? ` · ~${euro(est)}` : ''}</Button>
+        </>
+      }
+    >
+      <p className="font-semibold">{title} <span className="font-normal text-text-muted text-sm">· {dateLabel(entry.date)}</span></p>
+      {already.length > 0 && <p className="text-xs text-text-muted">Già scalati: {already.map((x) => `${x.p.name} ${fmtQty(x.qty)} ${x.p.default_unit}`).join(' · ')}</p>}
+      {rows.map((r) => {
+        const st = rowState(r, data);
+        return (
+          <div key={r.key} className="flex items-center gap-2 border-t border-bg-border pt-2">
+            <span className={`w-2 h-2 rounded-full shrink-0 ${DOT[st]}`} />
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium truncate">{r.product.name}</div>
+              {st !== 'ok' && (
+                <div className="flex flex-wrap gap-1.5 mt-1">
+                  {[['comunque', 'usato comunque'], ['lista', 'finito → lista spesa']].map(([k, l]) => (
+                    <button key={k} type="button" onClick={() => upd(r.key, { action: k })} className={`rounded-full border px-2 py-0.5 text-xs ${r.action === k ? 'border-brand text-brand bg-brand/10' : 'border-bg-border text-text-muted'}`}>{l}</button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <input inputMode="decimal" aria-label={`Quantità ${r.product.name}`} value={r.qtyText ?? fmtQty(r.qty)} onChange={(e) => upd(r.key, { qtyText: e.target.value, qty: num(e.target.value) })} className="w-16 rounded-md bg-bg-elevated border border-bg-border px-2 py-1 text-right tabular-nums text-sm focus:outline-none focus:border-brand" />
+            <span className="text-text-muted text-sm w-9">{r.product.default_unit}</span>
+            <button type="button" aria-label={`Togli ${r.product.name}`} className="text-text-muted text-sm px-1" onClick={() => setRows((a) => a.filter((x) => x.key !== r.key))}>✕</button>
+          </div>
+        );
+      })}
+      <Field label={rows.length ? 'Altro ingrediente' : 'Cosa hai aggiunto?'}>
+        <ProductPicker products={data.products} area="cibo" autoFocus placeholder="Cerca in dispensa…" onPick={(p) => setRows((a) => [...a, { key: `${p.id}-${a.length}`, product: p, qty: portionQty(p), action: 'comunque' }])} />
+      </Field>
+      <p className="text-xs text-text-muted">Scalo dalla dispensa con la data del piatto (prima i lotti che scadono). Se togli “mangiato”, rimetto in dispensa anche questi.</p>
     </Modal>
   );
 }
