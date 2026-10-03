@@ -217,6 +217,8 @@ export function ingredientStatus(ing, scale, data, subs) {
   const p = ing.product_id && data.products[ing.product_id];
   if (!p) return { level: 'unlinked' };
   const unit = p.default_unit;
+  // sempre in casa (acqua…): sempre presente, non si scala, non va in lista
+  if (p.always_have) return { level: 'ok', always: true, have: null, need: null, unit, product: p, missing: 0 };
   const have = stockIn(data, p.id, unit);
   const vague = ing.qty == null || normUnit(ing.unit) === 'q.b.';
   // q.b. di un prodotto a usi (spezie, salse): 1 uso per ricetta intera
@@ -387,7 +389,7 @@ export function proposedUses(status) {
   const map = new Map();
   for (const { ing, st } of status.rows) {
     const src = st.level !== 'ok' && st.sub ? { product: st.sub.product, need: st.sub.need } : st.product ? { product: st.product, need: st.need } : null;
-    if (!src || ing.optional) continue; // superfluo: non si scala
+    if (!src || ing.optional || st.always) continue; // superfluo / sempre in casa: non si scala
     if (!st.sub && !(st.have > 0)) continue; // niente in casa: niente da scalare
     const cur = map.get(src.product.id) || { product: src.product, qty: 0, known: true, label: [] };
     if (src.need == null) cur.known = cur.qty > 0;

@@ -17,8 +17,14 @@ const FIELDS = [
   { k: 'open_shelf_days', ai: 'open_days', label: 'Aperto gg' },
 ];
 const has = (v) => v != null && v !== '';
-const noDur = (p) => !has(p.pantry_days) && !has(p.fridge_days);
-const num = (v) => (v === '' || v == null ? null : Math.max(0, Math.round(Number(String(v).replace(',', '.')))) || null);
+// Almeno uno tra dispensa, frigo, freezer e' obbligatorio; vuoto = li' non si conserva; 0 = da consumare subito.
+const noDur = (p) => !has(p.pantry_days) && !has(p.fridge_days) && !has(p.freezer_max_months);
+const num = (v) => {
+  if (v === '' || v == null) return null;
+  const n = Number(String(v).replace(',', '.'));
+  return Number.isFinite(n) ? Math.max(0, Math.round(n)) : null;
+};
+const STORE_KEYS = ['pantry_days', 'fridge_days', 'freezer_max_months'];
 
 export default function Durate() {
   const data = useData();
@@ -37,7 +43,7 @@ export default function Durate() {
   const [cats, setCats] = useState(null); // { id: by_use } modifiche in attesa di salvataggio
   const [catBusy, setCatBusy] = useState(false);
   const products = useMemo(
-    () => (data ? Object.values(data.products).filter((p) => p.area === 'cibo' && p.category_id !== 'cat-avanzi').sort((a, b) => a.name.localeCompare(b.name, 'it')) : []),
+    () => (data ? Object.values(data.products).filter((p) => p.area === 'cibo' && p.category_id !== 'cat-avanzi' && !p.always_have).sort((a, b) => a.name.localeCompare(b.name, 'it')) : []),
     [data]
   );
   if (!data || !ai) return null;
@@ -46,14 +52,14 @@ export default function Durate() {
   const value = (p, f) => {
     const e = edit[p.id];
     if (e && f.k in e) return e[f.k];
-    if (!has(p[f.k]) && ai[p.id] && has(ai[p.id][f.ai])) return ai[p.id][f.ai];
+    if (noDur(p) && ai[p.id] && has(ai[p.id][f.ai])) return ai[p.id][f.ai];
     return p[f.k] ?? '';
   };
   const catByUse = (id) => (cats && id in cats ? cats[id] : !!data.categories[id]?.by_use);
   const needsUses = (p) => catByUse(p.category_id) && !has(p.uses_per_pack);
   const empty = (p) => noDur(p) || needsUses(p);
   // usi mostrati per 100 g/ml o per unita' (vedi logic.js)
-  const usesVal = (p) => (edit[p.id] && 'uses_per_pack' in edit[p.id] ? edit[p.id].uses_per_pack : !has(p.uses_per_pack) && has(ai[p.id]?.uses_per_pack) ? ai[p.id].uses_per_pack : usesShown(p) ?? '');
+  const usesVal = (p) => (edit[p.id] && 'uses_per_pack' in edit[p.id] ? edit[p.id].uses_per_pack : !has(p.uses_per_pack) && (noDur(p) || needsUses(p)) && has(ai[p.id]?.uses_per_pack) ? ai[p.id].uses_per_pack : usesShown(p) ?? '');
   const usesLabel = (p) => `Usi/${p.default_unit === 'g' || p.default_unit === 'ml' ? `100${p.default_unit}` : p.default_unit}`;
   const foodCats = data.categoryList.filter((c) => c.area === 'cibo' && c.id !== 'cat-avanzi');
   const catsDirty = cats && Object.entries(cats).some(([id, v]) => v !== !!data.categories[id]?.by_use);
@@ -79,7 +85,13 @@ export default function Durate() {
     setCats(null);
     showToast('Categorie salvate', { label: 'Annulla', run: () => undo() });
   }
-  const proposed = (p, f) => !has(p[f.k]) && has(ai[p.id]?.[f.ai]) && !(edit[p.id] && f.k in edit[p.id]);
+  const proposed = (p, f) => noDur(p) && has(ai[p.id]?.[f.ai]) && !(edit[p.id] && f.k in edit[p.id]);
+  // riga valida: almeno uno tra dispensa / frigo / freezer (+ usi se categoria a utilizzo)
+  const rowMissing = (p) => {
+    const st = STORE_KEYS.some((k) => num(value(p, FIELDS.find((f) => f.k === k))) != null);
+    const uses = !catByUse(p.category_id) || has(usesVal(p));
+    return !st ? 'Serve almeno uno tra dispensa, frigo e freezer' : !uses ? 'Servono gli usi (categoria a utilizzo)' : null;
+  };
 
   const todo = products.filter(empty);
   const list = tab === 'todo' ? todo : products;
@@ -121,21 +133,24 @@ export default function Durate() {
     }
   }
 
+  const selBad = products.filter((p) => sel.has(p.id) && rowMissing(p));
   async function confirm() {
     const ops = [];
     for (const p of products) {
-      if (!sel.has(p.id)) continue;
+      if (!sel.has(p.id) || rowMissing(p)) continue;
       const row = { id: p.id };
       for (const f of FIELDS) row[f.k] = num(value(p, f));
       row.uses_per_pack = usesFromShown(usesVal(p), p.default_unit);
       if (!allowedLocation({ ...p, ...row }, p.default_location_id)) row.default_location_id = ['loc-dispensa', 'loc-frigo', 'loc-freezer'].find((l) => allowedLocation({ ...p, ...row }, l)) || 'loc-altro';
       ops.push({ table: 'products', row });
     }
-    if (!ops.length) return;
+    if (!ops.length) return showToast(selBad.length ? 'Completa le righe in rosso' : 'Niente da salvare');
     await save(ops, `Durate di ${ops.length} prodotti`);
-    setSel(new Set());
-    setEdit({});
-    showToast(`Salvate le durate di ${ops.length} prodotti`, { label: 'Annulla', run: () => undo() });
+    const saved = new Set(ops.map((o) => o.row.id));
+    // restano selezionate (e modificate) solo le righe incomplete
+    setSel(new Set([...sel].filter((id) => !saved.has(id))));
+    setEdit((e) => Object.fromEntries(Object.entries(e).filter(([id]) => !saved.has(id))));
+    showToast(`Salvate le durate di ${ops.length} prodotti${selBad.length ? ` · ${selBad.length} da completare` : ''}`, { label: 'Annulla', run: () => undo() });
   }
 
   const inputCls = (hl) => `w-full rounded-md bg-bg-elevated border px-2 py-1.5 text-sm tabular-nums focus:outline-none focus:border-brand ${hl ? 'border-brand/60 text-brand' : 'border-bg-border'}`;
@@ -183,22 +198,22 @@ export default function Durate() {
 
       <div className="rounded-lg border border-bg-border bg-bg-surface p-4 space-y-3">
         <p className="text-sm text-text-secondary">
-          Giorni da quando entra in casa (confezione chiusa), mesi in freezer, giorni da aperto. Vuoto = lì non ci va. Le proposte AI sono in <span className="text-brand">giallo</span>: correggi e conferma.
+          Giorni da quando entra in casa (confezione chiusa), mesi in freezer, giorni da aperto. <b>Vuoto</b> = lì non si conserva · <b>0</b> = da consumare subito. Almeno uno tra dispensa, frigo e freezer; “aperto” è facoltativo. Le proposte AI sono in <span className="text-brand">giallo</span>: correggi e conferma.
         </p>
         <div className="flex flex-wrap gap-2">
           <Button variant="ghost" onClick={askAi} disabled={!!busy || !toAskAll.length}>
             {busy ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
             {busy ? `AI… ${busy.done}/${busy.total}` : `Proponi con AI (${toAskAll.length})`}
           </Button>
-          <Button onClick={confirm} disabled={!sel.size}>
-            <CheckCheck size={16} /> Conferma selezionati ({sel.size})
+          <Button onClick={confirm} disabled={!sel.size || selBad.length === sel.size}>
+            <CheckCheck size={16} /> Conferma selezionati ({sel.size - selBad.length})
           </Button>
         </div>
         {err && <p className="text-sm text-negative">{err}</p>}
       </div>
 
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <Tabs value={tab} onChange={setTab} tabs={[{ value: 'todo', label: 'Senza durate', count: todo.length }, { value: 'all', label: 'Tutti', count: products.length }]} />
+        <Tabs value={tab} onChange={setTab} tabs={[{ value: 'todo', label: 'Da completare', count: todo.length }, { value: 'all', label: 'Tutti', count: products.length }]} />
         {withProposal.length > 0 && (
           <div className="flex gap-3 text-sm">
             <button type="button" className="text-brand font-semibold" onClick={() => setSel(new Set([...sel, ...withProposal.map((p) => p.id)]))}>Seleziona proposte</button>
@@ -230,6 +245,7 @@ export default function Durate() {
                   <input inputMode="decimal" className={`${inputCls(!has(p.uses_per_pack) && has(ai[p.id]?.uses_per_pack) && !(edit[p.id] && 'uses_per_pack' in edit[p.id]))} ${needsUses(p) && !has(usesVal(p)) ? '!border-negative' : ''}`} value={usesVal(p)} placeholder="—" onChange={(e) => setField(p, 'uses_per_pack', e.target.value)} />
                 </label>
               </div>
+              {sel.has(p.id) && rowMissing(p) && <p className="text-xs text-negative">{rowMissing(p)}</p>}
             </li>
           ))}
         </ul>

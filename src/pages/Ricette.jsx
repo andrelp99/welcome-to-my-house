@@ -4,7 +4,8 @@ import { Plus, Search, Clock, BookOpen, Download, Leaf, CalendarDays, Link2, Che
 import { recipeSeason, monthName } from '../db/season.js';
 import { useData, useRecipes } from '../hooks/useData.js';
 import { Button, Tabs, Empty, Select } from '../components/ui/kit.jsx';
-import { Photo, SubstitutionsPanel } from '../components/recipes.jsx';
+import { Photo } from '../components/recipes.jsx';
+import Ingredienti from './Ingredienti.jsx';
 import { recipeStatus, parseList, DIET_TAGS, DIFFICULTY } from '../db/recipes.js';
 import { countUnlinked } from '../db/linker.js';
 import { autoTags, cleanTags, TIMES, COURSE_MAIN, BASES, DIFF_LABEL, FEATURE_GROUPS, COMPUTED_FEATURES, FEATURE_LABEL, featuresOf, foodLabel } from '../db/tags.js';
@@ -100,7 +101,7 @@ export default function Ricette() {
           <h1 className="text-2xl md:text-3xl font-bold">Ricettario</h1>
           <p className="text-text-secondary text-sm">Dosi per 1 porzione, confrontate con la dispensa. <span className="text-warning">*</span> = con sostituti.</p>
         </div>
-        {tab !== 'subs' && (
+        {tab !== 'ing' && (
           <div className="flex gap-2 shrink-0">
             <Button variant="ghost" aria-label="Planner" onClick={() => nav('/planner')}>
               <CalendarDays size={18} /> <span className="hidden sm:inline">Planner</span>
@@ -122,11 +123,11 @@ export default function Ricette() {
           { value: 'all', label: 'Tutte', count: counts.all },
           { value: 'ok', label: 'Fattibili', count: counts.ok },
           { value: 'fav', label: '★★★★★ Preferite', count: counts.fav },
-          { value: 'subs', label: 'Sostituti' },
+          { value: 'ing', label: 'Ingredienti' },
         ]}
       />
 
-      {tab !== 'subs' && unlinked > 0 && (
+      {tab !== 'ing' && unlinked > 0 && (
         <Link to="/ricette/collega" className="flex items-center gap-3 rounded-lg border border-brand/50 bg-brand/10 px-4 py-3 hover:border-brand">
           <Link2 size={18} className="text-brand shrink-0" />
           <span className="flex-1 text-sm">
@@ -136,15 +137,15 @@ export default function Ricette() {
         </Link>
       )}
 
-      {goal && tab !== 'subs' && (
+      {goal && tab !== 'ing' && (
         <div className="flex items-center justify-between gap-2 rounded-lg border border-warning/50 bg-warning/10 px-4 py-2 text-sm">
           <span>Obiettivo della settimana: <b>{goal.label}</b></span>
           <button type="button" className="text-brand font-semibold" onClick={() => setParams({})}>Tutte</button>
         </div>
       )}
 
-      {tab === 'subs' ? (
-        <SubstitutionsPanel data={data} rec={rec} />
+      {tab === 'ing' ? (
+        <Ingredienti data={data} rec={rec} />
       ) : (
         <>
           <div className="relative">

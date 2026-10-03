@@ -135,7 +135,8 @@ export async function applyLinks(choices, label) {
       }
     }
     if (!pid) continue;
-    for (const i of group.ings) ops.push({ table: 'recipe_ingredients', row: { id: i.id, product_id: pid } });
+    const alwaysOpt = prop.kind === 'link' && prop.product?.always_optional;
+    for (const i of group.ings) ops.push({ table: 'recipe_ingredients', row: { id: i.id, product_id: pid, ...(alwaysOpt ? { optional: 1 } : {}) } });
   }
   if (ops.length) await save(ops, label);
   return { ingredients: ops.filter((o) => o.table === 'recipe_ingredients').length, products: created.size };

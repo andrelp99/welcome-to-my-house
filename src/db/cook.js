@@ -72,6 +72,7 @@ export function buildUses({ recipe, entry, cooked, data, rec }) {
         unlinked++;
         continue;
       }
+      if (p.always_have) continue; // sempre in casa: non si scala
       const st = ingredientStatus(ing, scale, data, rec.subs);
       const opts = optionsFor(p, data, rec);
       const useSub = st.level !== 'ok' && st.sub;

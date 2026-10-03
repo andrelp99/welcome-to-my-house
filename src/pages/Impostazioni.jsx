@@ -139,7 +139,7 @@ export default function Impostazioni() {
         <p className="text-text-secondary text-sm">{key ? 'Dispositivo attivato.' : 'Dispositivo non attivato: apri il link di attivazione.'}</p>
       </Card>
       <Card title="Versione" icon={Info}>
-        <p className="text-text-secondary text-sm">0.15.0 · terzo alimento, ingredienti in più</p>
+        <p className="text-text-secondary text-sm">0.16.0 · ingredienti delle ricette, durate</p>
       </Card>
     </div>
   );

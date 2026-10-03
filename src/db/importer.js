@@ -294,7 +294,7 @@ export function draftToOps(draft, products, learned) {
     },
   ];
   draft.ingredients.forEach((i, n) => {
-    ops.push({ table: 'recipe_ingredients', row: { id: uuid(), recipe_id: rid, product_id: autoLink(i.text, products, learned), text: i.text, qty: i.qty ?? null, unit: i.unit || null, optional: i.optional ? 1 : 0, grp: i.grp || null, sort: n } });
+    ops.push({ table: 'recipe_ingredients', row: { id: uuid(), recipe_id: rid, product_id: autoLink(i.text, products, learned), text: i.text, qty: i.qty ?? null, unit: i.unit || null, optional: i.optional || products[autoLink(i.text, products, learned)]?.always_optional ? 1 : 0, grp: i.grp || null, sort: n } });
   });
   draft.steps.forEach((s, n) => {
     ops.push({ table: 'recipe_steps', row: { id: uuid(), recipe_id: rid, text: s.text, timer_min: s.timer_min ?? null, photo_key: s.photo_key || null, sort: n } });

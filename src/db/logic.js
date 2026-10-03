@@ -24,7 +24,7 @@ export function lotLimit(lot, product) {
 // ma solo se il prodotto ha almeno una durata impostata (altrimenti va ovunque, come prima).
 export const LOC_DAYS = { 'loc-dispensa': 'pantry_days', 'loc-frigo': 'fridge_days' };
 const set_ = (v) => v != null && v !== '';
-export const hasDurations = (p) => !!p && p.area === 'cibo' && (set_(p.pantry_days) || set_(p.fridge_days));
+export const hasDurations = (p) => !!p && p.area === 'cibo' && (set_(p.pantry_days) || set_(p.fridge_days) || set_(p.freezer_max_months));
 export function allowedLocation(p, locId) {
   if (!hasDurations(p)) return true;
   if (locId === 'loc-freezer') return set_(p.freezer_max_months);

@@ -217,6 +217,17 @@ Sostituisce i tag AI liberi della 0.10 (quei tag ora sono nascosti per non dupli
 - **Catalogo**: pulsante fisso "Durate e porzioni".
 - Migrazione `0009_classificazione.sql`: PRIMA del push.
 
+## Ingredienti delle ricette e durate (0.16.0)
+
+- **Ricettario → Ingredienti** (sostituisce la scheda Sostituti; `src/pages/Ingredienti.jsx`): una riga per prodotto collegato o per testo non collegato (raggruppato con `ingKey`), con numero di ricette, stato (non collegato · in dispensa · non in dispensa · sempre in casa · non serve), sostituti.
+  - Filtri: stato + Senza sostituti / Con sostituti / Non necessari / In 3+ ricette; ricerca; ordina per più usati, senza sostituti prima, A–Z.
+  - Riga aperta: collega (anche "forse: X" con un tocco), sostituti con rapporto modificabile, suggerimenti stessa categoria in dispensa, "Altro sostituto…", **Proponi con AI** (`POST /api/ai/substitutes`, solo prodotti del catalogo, conferma per ognuno o "Accetta tutti").
+  - Selezione multipla: Non necessari · Sempre in casa · Sostituti con AI.
+- **Sempre in casa** (`products.always_have`): sempre verde, mai scalato, mai in lista spesa, escluso da costi e durate. Su un testo non collegato (es. acqua) crea il prodotto e lo collega.
+- **Sempre non necessario** (`products.always_optional`): superfluo in tutte le ricette (scrive `optional` sulle righe) e nelle nuove (import, collegamenti, modulo).
+- **Durate e porzioni**: almeno uno tra dispensa, frigo, freezer è obbligatorio (riga rossa se manca); vuoto = lì non si conserva; 0 = da consumare subito; "aperto" facoltativo. Un prodotto con almeno una durata esce da "Da completare" e non mostra più le proposte AI nei campi lasciati vuoti. Un prodotto solo-freezer ora può stare solo in freezer.
+- Migrazione `0014`: `products.always_have`, `products.always_optional`.
+
 ## Terzo alimento delle ricette (0.15.0)
 
 - `recipes.third_food` (migrazione `0013`), facoltativo come il secondario: compare nel modulo ricetta e in Classifica con AI solo se c'è il secondario; l'AI lo propone raramente (piatti con tre componenti importanti).

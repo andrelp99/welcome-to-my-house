@@ -29,7 +29,7 @@ export function recipeCost(ings, scale, data) {
   for (const i of ings) {
     if (i.optional || !i.product_id || i.product_id === NO_PRODUCT) continue;
     const p = data.products[i.product_id];
-    if (!p) continue;
+    if (!p || p.always_have) continue;
     if (i.qty == null || normUnit(i.unit) === 'q.b.') continue;
     const need = toProductUnit(i.qty * scale, i.unit, p);
     const v = need == null ? null : priceOf(p, need, data);

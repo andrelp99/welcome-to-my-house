@@ -126,7 +126,7 @@ export default function RicettaForm() {
     ings.forEach((i, n) => {
       if (!i.text.trim()) return;
       keepI.add(i.id);
-      ops.push({ table: 'recipe_ingredients', row: { id: i.id, recipe_id: rid, product_id: i.product_id || null, text: i.text.trim(), qty: num(i.qty), unit: i.unit || null, optional: i.optional ? 1 : 0, grp: i.grp?.trim() || null, sort: n, deleted: 0 } });
+      ops.push({ table: 'recipe_ingredients', row: { id: i.id, recipe_id: rid, product_id: i.product_id || null, text: i.text.trim(), qty: num(i.qty), unit: i.unit || null, optional: i.optional || data.products[i.product_id]?.always_optional ? 1 : 0, grp: i.grp?.trim() || null, sort: n, deleted: 0 } });
     });
     const keepS = new Set();
     steps.forEach((s, n) => {

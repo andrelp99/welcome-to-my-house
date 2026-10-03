@@ -97,6 +97,8 @@ export function IngredientList({ rows, scale, onLink, onOptional }) {
               'non conta: né presente né mancante'
             ) : st.level === 'free' ? (
               'non serve in dispensa'
+            ) : st.always ? (
+              'sempre in casa'
             ) : st.level === 'unlinked' ? (
               onLink ? (
                 <button type="button" className="text-brand font-semibold print:hidden" onClick={() => onLink(ing)}>Collega al catalogo</button>

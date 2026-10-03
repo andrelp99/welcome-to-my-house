@@ -208,6 +208,35 @@ app.post('/ai/durations', async (c) => {
 });
 
 // Categorie "a utilizzo" (spezie, salse...): proposta AI, conferma in app.
+// Sostituti dal catalogo di casa per ingredienti che non ne hanno (max 30 per chiamata).
+app.post('/ai/substitutes', async (c) => {
+  const body = await c.req.json<{ items?: { name?: string; category?: string }[]; catalog?: string[] }>().catch(() => null);
+  const items = (body?.items || []).slice(0, 30).map((x) => ({ name: String(x?.name || '').slice(0, 80), category: String(x?.category || '').slice(0, 60) }));
+  const catalog = [...new Set((body?.catalog || []).map((x) => String(x).slice(0, 80)))].slice(0, 600);
+  if (!items.length || items.some((x) => !x.name) || !catalog.length) return c.json({ error: 'Niente da proporre' }, 400);
+  const byLower = new Map(catalog.map((n) => [n.toLowerCase(), n]));
+  const text = `Catalogo: ${catalog.join(' | ')}\n\nIngredienti:\n${items.map((x, n) => `${n + 1}. ${x.name} (${x.category || '—'})`).join('\n')}`;
+  try {
+    const { model, data } = await extract(c.env, 'substitutes', { text });
+    const raw = Array.isArray((data as any)?.items) ? (data as any).items : [];
+    const out = items.map((x, i) => {
+      const r = raw.find((y: any) => Number(y?.n) === i + 1) || raw[i] || {};
+      const subs = (Array.isArray(r.subs) ? r.subs : [])
+        .map((s: any) => {
+          const name = byLower.get(String(s?.name || '').toLowerCase().trim());
+          const ratio = Number(s?.ratio);
+          return name && name.toLowerCase() !== x.name.toLowerCase() ? { name, ratio: Number.isFinite(ratio) && ratio > 0 ? Math.min(Math.round(ratio * 100) / 100, 10) : 1, note: s?.note ? String(s.note).slice(0, 80) : null } : null;
+        })
+        .filter(Boolean)
+        .slice(0, 3);
+      return { name: x.name, subs };
+    });
+    return c.json({ model, items: out });
+  } catch (e) {
+    return c.json({ error: `AI: ${(e as Error).message}` }, 502);
+  }
+});
+
 app.post('/ai/categories', async (c) => {
   const body = await c.req.json<{ items?: { id?: string; name?: string; examples?: string[] }[] }>().catch(() => null);
   const items = (body?.items || []).slice(0, 60).map((x) => ({ id: String(x?.id || '').slice(0, 40), name: String(x?.name || '').slice(0, 60), examples: (x?.examples || []).slice(0, 8).map((e) => String(e).slice(0, 40)) }));

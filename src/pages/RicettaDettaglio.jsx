@@ -96,7 +96,7 @@ export default function RicettaDettaglio() {
     nav('/ricette');
   }
   async function link(ing, p) {
-    await put('recipe_ingredients', { id: ing.id, product_id: p.id }, `${ing.text} → ${p.name}`);
+    await put('recipe_ingredients', { id: ing.id, product_id: p.id, ...(p.always_optional ? { optional: 1 } : {}) }, `${ing.text} → ${p.name}`);
     setLinking(null);
   }
 

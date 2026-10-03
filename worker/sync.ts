@@ -8,7 +8,7 @@ export const TABLES: Record<string, string[]> = {
   products: [
     'id', 'name', 'area', 'category_id', 'default_unit', 'default_location_id', 'favorite', 'essential',
     'min_stock', 'open_shelf_days', 'freezer_max_months', 'diet_tags', 'alternatives', 'notes',
-    'pantry_days', 'fridge_days', 'uses_per_pack',
+    'pantry_days', 'fridge_days', 'uses_per_pack', 'always_have', 'always_optional',
   ],
   receipts: ['id', 'store_id', 'date', 'total_paid', 'total_discount', 'photo_key', 'notes'],
   purchase_lines: ['id', 'receipt_id', 'product_id', 'qty', 'unit', 'price_paid', 'price_full', 'discount', 'offer_type', 'from_list'],
